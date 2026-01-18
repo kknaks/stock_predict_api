@@ -1,0 +1,19 @@
+name: stock-predict-api
+
+services:
+  stock-predict-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stock-predict-api
+    restart: unless-stopped
+    ports:
+      - "8003:8003"
+    env_file:
+      - .env
+    networks:
+      - stock-predict-network
+
+networks:
+  stock-predict-network:
+    external: true

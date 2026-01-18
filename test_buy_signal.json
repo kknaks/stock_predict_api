@@ -1,0 +1,15 @@
+{
+  "timestamp": "2026-01-17T00:40:00",
+  "user_strategy_id": 2,
+  "signal_type": "BUY",
+  "stock_code": "000670",
+  "current_price": 56100.0,
+  "target_price": 58833.56,
+  "target_quantity": 6,
+  "stop_loss_price": 55539.0,
+  "recommended_order_price": 56100.0,
+  "recommended_order_type": "지정가",
+  "expected_slippage_pct": 0.0,
+  "urgency": "normal",
+  "reason": "테스트 매수 시그널"
+}

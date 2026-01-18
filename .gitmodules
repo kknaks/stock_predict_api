@@ -1,0 +1,4 @@
+[submodule "app/database"]
+	path = app/database
+	url = https://github.com/kknaks/stock_predict_database.git
+	branch = main
