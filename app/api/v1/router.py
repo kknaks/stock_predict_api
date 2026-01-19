@@ -4,7 +4,7 @@ API v1 라우터 통합
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, users, stocks
+from app.api.v1.endpoints import auth, users, stocks, predict
 
 api_router = APIRouter()
 
@@ -12,7 +12,7 @@ api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["Auth"])
 api_router.include_router(users.router, prefix="/users", tags=["Users"])
 api_router.include_router(stocks.router, prefix="/stocks", tags=["Stocks"])
-
+api_router.include_router(predict.router, prefix="/predict", tags=["Predict"])
 # 추가 라우터 예시:
 # from app.api.v1.endpoints import stocks, predictions
 # api_router.include_router(stocks.router, prefix="/stocks", tags=["Stocks"])

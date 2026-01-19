@@ -2,8 +2,8 @@
 Stock Repository - DB 접근 레이어
 """
 
-from datetime import date
-from sqlalchemy import select
+from datetime import date, datetime
+from sqlalchemy import select, func, cast, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -96,12 +96,14 @@ class StockRepository:
         self, user_strategy_id: int, order_date: date
     ) -> DailyStrategy | None:
         """일일 전략 조회 (종목 정보 포함)"""
+        # created_at은 DateTime이므로 날짜 부분만 비교
+        # 또는 timestamp 필드의 날짜 부분을 비교
         result = await self.db.execute(
             select(DailyStrategy)
             .options(selectinload(DailyStrategy.stocks))
             .where(
                 DailyStrategy.user_strategy_id == user_strategy_id,
-                DailyStrategy.created_at == order_date
+                func.date(DailyStrategy.timestamp) == order_date
             )
         )
         return result.scalar_one_or_none()
