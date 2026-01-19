@@ -13,6 +13,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings, init_db, close_db
 from app.kafka.daily_strategy_consumer import get_daily_strategy_consumer
 from app.kafka.order_signal_consumer import get_order_signal_consumer
+from app.kafka.price_consumer import get_price_consumer
+from app.handler.price_handler import get_price_handler
+from app.services.price_cache import get_price_cache
 from app.handler.daily_strategy_handler import get_daily_strategy_handler
 from app.handler.order_signal_hanlder import get_order_signal_handler
 from app.handler.order_result_handler import get_order_result_handler
@@ -30,13 +33,14 @@ logging.getLogger("aiokafka").setLevel(logging.INFO)
 # 백그라운드 태스크
 _consumer_task: Optional[asyncio.Task] = None
 _order_consumer_task: Optional[asyncio.Task] = None
+_price_consumer_task: Optional[asyncio.Task] = None
 _consumer_tasks: list[asyncio.Task] = []
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """앱 시작/종료 시 실행되는 lifespan 이벤트"""
-    global _consumer_task, _order_consumer_task, _consumer_tasks
+    global _consumer_task, _order_consumer_task, _price_consumer_task, _consumer_tasks
     
     # Startup
     logger.info(f"Starting {settings.app_name} v{settings.app_version}")
@@ -51,10 +55,19 @@ async def lifespan(app: FastAPI):
     order_signal_handler = get_order_signal_handler()
     order_result_handler = get_order_result_handler()
     
+    # Price Kafka Consumer 시작
+    price_consumer = get_price_consumer()
+    price_handler = get_price_handler()
+    price_cache = get_price_cache()
+    
+    # Price Cache 시작
+    await price_cache.start()
+    
     # 핸들러 등록
     daily_strategy_consumer.add_handler(daily_strategy_handler.handle_daily_strategy)
     order_signal_consumer.add_handler(order_signal_handler.handle_order_signal)
     order_signal_consumer.add_order_result_handler(order_result_handler.handle_order_result)
+    price_consumer.add_handler(price_handler.handle_price)
     
     # Consumer 시작
     daily_strategy_consumer_connected = await daily_strategy_consumer.start()
@@ -74,6 +87,14 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("Failed to connect to Order signal Kafka consumer")
     
+    price_consumer_connected = await price_consumer.start()
+    if price_consumer_connected:
+        logger.info("Price Kafka consumer connection established")
+        _price_consumer_task = asyncio.create_task(price_consumer.consume())
+        _consumer_tasks.append(_price_consumer_task)
+    else:
+        logger.warning("Failed to connect to Price Kafka consumer")
+    
     logger.info("Application startup complete")
     
     yield
@@ -92,6 +113,11 @@ async def lifespan(app: FastAPI):
     
     await daily_strategy_consumer.stop()
     await order_signal_consumer.stop()
+    await price_consumer.stop()
+    
+    # Price Cache 중지
+    price_cache = get_price_cache()
+    await price_cache.stop()
     
     await close_db()
     logger.info("Application shutdown complete")

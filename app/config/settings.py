@@ -60,6 +60,7 @@ class Settings(BaseSettings):
 
     daily_strategy: str = "daily_strategy"
     order_signal: str = "order_signal"
+    topic_price: str = "stock_price"
     
     @property
     def kafka_servers(self) -> str:

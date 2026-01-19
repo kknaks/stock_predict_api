@@ -3,6 +3,7 @@ Stock Repository - DB 접근 레이어
 """
 
 from datetime import date, datetime
+from typing import Optional
 from sqlalchemy import select, func, cast, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -13,6 +14,7 @@ from app.database.database.strategy import (
     StrategyStatus,
     DailyStrategy,
 )
+from app.database.database.stocks import StockPrices
 
 
 class StockRepository:
@@ -98,12 +100,35 @@ class StockRepository:
         """일일 전략 조회 (종목 정보 포함)"""
         # created_at은 DateTime이므로 날짜 부분만 비교
         # 또는 timestamp 필드의 날짜 부분을 비교
+        # 같은 날짜에 여러 레코드가 있을 수 있으므로 가장 최근 레코드를 선택
         result = await self.db.execute(
             select(DailyStrategy)
             .options(selectinload(DailyStrategy.stocks))
             .where(
                 DailyStrategy.user_strategy_id == user_strategy_id,
                 func.date(DailyStrategy.timestamp) == order_date
+            )
+            .order_by(DailyStrategy.timestamp.desc())
+            .limit(1)
+        )
+        return result.scalars().first()
+
+    async def get_closing_price(self, stock_code: str, target_date: date) -> Optional[float]:
+        """
+        종목의 특정 날짜 종가 조회
+        
+        Args:
+            stock_code: 종목 코드
+            target_date: 조회할 날짜
+        
+        Returns:
+            종가 또는 None (데이터가 없으면)
+        """
+        result = await self.db.execute(
+            select(StockPrices.close)
+            .where(
+                StockPrices.symbol == stock_code,
+                StockPrices.date == target_date
             )
         )
         return result.scalar_one_or_none()

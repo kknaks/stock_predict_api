@@ -7,6 +7,17 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+class StrategyInfoSchema(BaseModel):
+    """전략 정보 스키마"""
+
+    id: int = Field(..., description="전략 ID")
+    name: str = Field(..., description="전략명")
+    description: Optional[str] = Field(None, description="전략 설명")
+
+    class Config:
+        from_attributes = True
+
+
 class PredictionItem(BaseModel):
     """예측 결과 아이템"""
 
@@ -37,6 +48,33 @@ class PredictionItem(BaseModel):
     actual_max_return: Optional[float] = Field(None, description="실제 고가 수익률 (%)")
     max_return_diff: Optional[float] = Field(None, description="고가 예측 차이")
     direction_correct: Optional[int] = Field(None, description="예측 방향 정확도 (1: 맞음, 0: 틀림)")
+    current_price: Optional[float] = Field(None, description="현재가 (장중) 또는 종가 (장 마감 후/이전 날)")
 
     class Config:
         from_attributes = True
+
+
+class PredictionItemWithStrategy(PredictionItem):
+    """전략 정보를 포함한 예측 결과 아이템"""
+
+    strategy_info: Optional[StrategyInfoSchema] = Field(None, description="전략 정보")
+
+    class Config:
+        from_attributes = True
+
+
+class StrategyWithPredictions(BaseModel):
+    """전략과 해당 전략의 예측 리스트를 포함한 스키마"""
+
+    strategy_info: StrategyInfoSchema = Field(..., description="전략 정보")
+    predictions: list[PredictionItem] = Field(default_factory=list, description="해당 전략의 예측 리스트")
+
+    class Config:
+        from_attributes = True
+
+
+class PredictListResponse(BaseModel):
+    """예측 목록 조회 응답"""
+
+    is_market_open: bool = Field(..., description="장중 여부")
+    data: list[StrategyWithPredictions] = Field(..., description="전략별 예측 목록")

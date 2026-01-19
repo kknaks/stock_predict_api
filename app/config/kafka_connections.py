@@ -37,6 +37,10 @@ class KafkaConfig:
     def topic_order_signal(self) -> str:
         return settings.order_signal
 
+    @property
+    def topic_price(self) -> str:
+        return settings.topic_price
+
 
 _config_instance: KafkaConfig | None = None
 
