@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, field_validator
 
 class OrderSignalMessage(BaseModel):
@@ -41,10 +41,21 @@ class OrderSignalMessage(BaseModel):
         return v
 
 
+class PositionInfo(BaseModel):
+    """Position 정보 (체결 시 포함)"""
+    holding_quantity: int = 0
+    average_price: float = 0.0
+    total_buy_quantity: int = 0
+    total_sell_quantity: int = 0
+    realized_pnl: float = 0.0
+
+
 class OrderResultMessage(BaseModel):
     """주문 결과 메시지 (주문 접수 및 체결통보)"""
     timestamp: datetime
     user_strategy_id: int
+    daily_strategy_id: Optional[int] = None  # 신규 추가
+    stock_name: Optional[str] = ""  # 신규 추가
     order_type: str  # BUY or SELL
     stock_code: str
     order_no: str  # 주문번호 (필수)
@@ -61,13 +72,17 @@ class OrderResultMessage(BaseModel):
     total_executed_price: float  # 누적 체결 가격 (가중평균)
     remaining_quantity: int  # 남은 수량
     is_fully_executed: bool  # 전량 체결 여부
+    # Position 정보 (체결 시 포함)
+    position: Optional[PositionInfo] = None  # 신규 추가
 
-    @field_validator('user_strategy_id', 'order_quantity', 'order_price', 'executed_quantity', 
-                     'executed_price', 'total_executed_quantity', 'total_executed_price', 
-                     'remaining_quantity', mode='before')
+    @field_validator('user_strategy_id', 'daily_strategy_id', 'order_quantity', 'order_price',
+                     'executed_quantity', 'executed_price', 'total_executed_quantity',
+                     'total_executed_price', 'remaining_quantity', mode='before')
     @classmethod
-    def parse_string_to_float(cls, v):
+    def parse_string_to_number(cls, v):
         """문자열로 된 숫자를 float/int로 변환"""
+        if v is None:
+            return None
         if isinstance(v, str):
             try:
                 if '.' in v:

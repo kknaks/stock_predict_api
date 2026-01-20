@@ -1,16 +1,26 @@
 """
-실시간 가격 SSE 엔드포인트
+실시간 가격 SSE 엔드포인트 및 시간봉 조회 API
 """
 
 import asyncio
 import json
 import logging
-from typing import Set
+from datetime import date, datetime
+from typing import Set, List, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.price_cache import get_price_cache
+from app.config.db_connections import get_db
+
+# stock_predict_database 모델 import
+try:
+    from database.strategy import HourCandleData
+except ImportError:
+    HourCandleData = None
 
 logger = logging.getLogger(__name__)
 
@@ -111,3 +121,152 @@ async def stream_price_updates(
             "X-Accel-Buffering": "no",  # Nginx 버퍼링 비활성화
         }
     )
+
+
+@router.get("/candles/{stock_code}")
+async def get_hour_candles(
+    stock_code: str,
+    start_date: Optional[date] = Query(None, description="시작 날짜 (YYYY-MM-DD)"),
+    end_date: Optional[date] = Query(None, description="종료 날짜 (YYYY-MM-DD)"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    특정 종목의 시간봉 데이터 조회
+
+    Args:
+        stock_code: 종목 코드
+        start_date: 시작 날짜 (기본값: 오늘)
+        end_date: 종료 날짜 (기본값: 오늘)
+
+    Returns:
+        시간봉 데이터 리스트
+    """
+    if HourCandleData is None:
+        raise HTTPException(status_code=500, detail="HourCandleData model not available")
+
+    # 기본값 설정
+    if start_date is None:
+        start_date = date.today()
+    if end_date is None:
+        end_date = date.today()
+
+    try:
+        # 쿼리 실행
+        stmt = (
+            select(HourCandleData)
+            .where(HourCandleData.stock_code == stock_code)
+            .where(HourCandleData.candle_date >= start_date)
+            .where(HourCandleData.candle_date <= end_date)
+            .order_by(HourCandleData.candle_date, HourCandleData.hour)
+        )
+
+        result = await db.execute(stmt)
+        candles = result.scalars().all()
+
+        return {
+            "stock_code": stock_code,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "count": len(candles),
+            "candles": [
+                {
+                    "candle_date": c.candle_date.isoformat(),
+                    "hour": c.hour,
+                    "open": c.open,
+                    "high": c.high,
+                    "low": c.low,
+                    "close": c.close,
+                    "volume": c.volume,
+                    "trade_count": c.trade_count,
+                }
+                for c in candles
+            ],
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching hour candles: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/candles/{stock_code}/today")
+async def get_today_hour_candles(
+    stock_code: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    특정 종목의 오늘 시간봉 데이터 조회 (캐시 + DB)
+
+    캐시에 실시간 데이터가 있으면 캐시 데이터 기반으로 시간봉 계산,
+    없으면 DB에서 조회
+
+    Args:
+        stock_code: 종목 코드
+
+    Returns:
+        시간봉 데이터 리스트
+    """
+    from app.handler.candle_handler import aggregate_ticks_to_hour_candles
+
+    price_cache = get_price_cache()
+    today = date.today()
+
+    # 캐시에서 틱 데이터 조회
+    ticks = price_cache.get_ticks(stock_code)
+
+    if ticks:
+        # 캐시에 데이터가 있으면 실시간 시간봉 계산
+        candles_dict = aggregate_ticks_to_hour_candles(stock_code, ticks, today)
+        candles = sorted(candles_dict.values(), key=lambda x: x["hour"])
+
+        return {
+            "stock_code": stock_code,
+            "date": today.isoformat(),
+            "source": "cache",
+            "count": len(candles),
+            "candles": candles,
+        }
+
+    # 캐시에 없으면 DB에서 조회
+    if HourCandleData is None:
+        return {
+            "stock_code": stock_code,
+            "date": today.isoformat(),
+            "source": "none",
+            "count": 0,
+            "candles": [],
+        }
+
+    try:
+        stmt = (
+            select(HourCandleData)
+            .where(HourCandleData.stock_code == stock_code)
+            .where(HourCandleData.candle_date == today)
+            .order_by(HourCandleData.hour)
+        )
+
+        result = await db.execute(stmt)
+        candles = result.scalars().all()
+
+        return {
+            "stock_code": stock_code,
+            "date": today.isoformat(),
+            "source": "database",
+            "count": len(candles),
+            "candles": [
+                {
+                    "candle_date": c.candle_date.isoformat(),
+                    "hour": c.hour,
+                    "open": c.open,
+                    "high": c.high,
+                    "low": c.low,
+                    "close": c.close,
+                    "volume": c.volume,
+                    "trade_count": c.trade_count,
+                }
+                for c in candles
+            ],
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching today's hour candles: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

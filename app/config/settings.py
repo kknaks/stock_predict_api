@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     daily_strategy: str = "daily_strategy"
     order_signal: str = "order_signal"
     topic_price: str = "stock_price"
+    topic_websocket_commands: str = "kis_websocket_commands"
     
     @property
     def kafka_servers(self) -> str:

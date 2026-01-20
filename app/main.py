@@ -14,11 +14,13 @@ from app.config import settings, init_db, close_db
 from app.kafka.daily_strategy_consumer import get_daily_strategy_consumer
 from app.kafka.order_signal_consumer import get_order_signal_consumer
 from app.kafka.price_consumer import get_price_consumer
+from app.kafka.websocket_command_consumer import get_websocket_command_consumer
 from app.handler.price_handler import get_price_handler
 from app.services.price_cache import get_price_cache
 from app.handler.daily_strategy_handler import get_daily_strategy_handler
 from app.handler.order_signal_hanlder import get_order_signal_handler
 from app.handler.order_result_handler import get_order_result_handler
+from app.handler.candle_handler import get_candle_handler
 
 # 로깅 설정
 logging.basicConfig(
@@ -34,13 +36,14 @@ logging.getLogger("aiokafka").setLevel(logging.INFO)
 _consumer_task: Optional[asyncio.Task] = None
 _order_consumer_task: Optional[asyncio.Task] = None
 _price_consumer_task: Optional[asyncio.Task] = None
+_websocket_cmd_consumer_task: Optional[asyncio.Task] = None
 _consumer_tasks: list[asyncio.Task] = []
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """앱 시작/종료 시 실행되는 lifespan 이벤트"""
-    global _consumer_task, _order_consumer_task, _price_consumer_task, _consumer_tasks
+    global _consumer_task, _order_consumer_task, _price_consumer_task, _websocket_cmd_consumer_task, _consumer_tasks
     
     # Startup
     logger.info(f"Starting {settings.app_name} v{settings.app_version}")
@@ -94,7 +97,22 @@ async def lifespan(app: FastAPI):
         _consumer_tasks.append(_price_consumer_task)
     else:
         logger.warning("Failed to connect to Price Kafka consumer")
-    
+
+    # WebSocket Command Kafka Consumer 시작 (STOP 신호 처리)
+    websocket_cmd_consumer = get_websocket_command_consumer()
+    candle_handler = get_candle_handler()
+
+    # 핸들러 등록 (STOP 신호 → 시간봉 생성 및 DB 저장)
+    websocket_cmd_consumer.add_handler(candle_handler.handle_stop_command)
+
+    websocket_cmd_consumer_connected = await websocket_cmd_consumer.start()
+    if websocket_cmd_consumer_connected:
+        logger.info("WebSocket command Kafka consumer connection established")
+        _websocket_cmd_consumer_task = asyncio.create_task(websocket_cmd_consumer.consume())
+        _consumer_tasks.append(_websocket_cmd_consumer_task)
+    else:
+        logger.warning("Failed to connect to WebSocket command Kafka consumer")
+
     logger.info("Application startup complete")
     
     yield
@@ -114,6 +132,7 @@ async def lifespan(app: FastAPI):
     await daily_strategy_consumer.stop()
     await order_signal_consumer.stop()
     await price_consumer.stop()
+    await websocket_cmd_consumer.stop()
     
     # Price Cache 중지
     price_cache = get_price_cache()

@@ -41,6 +41,10 @@ class KafkaConfig:
     def topic_price(self) -> str:
         return settings.topic_price
 
+    @property
+    def topic_websocket_commands(self) -> str:
+        return settings.topic_websocket_commands
+
 
 _config_instance: KafkaConfig | None = None
 
