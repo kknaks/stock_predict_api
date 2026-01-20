@@ -13,7 +13,7 @@ api_router.include_router(auth.router, prefix="/auth", tags=["Auth"])
 api_router.include_router(users.router, prefix="/users", tags=["Users"])
 api_router.include_router(stocks.router, prefix="/stocks", tags=["Stocks"])
 api_router.include_router(predict.router, prefix="/predict", tags=["Predict"])
-api_router.include_router(price.router, prefix="/stocks/price", tags=["Price"])
+api_router.include_router(price.router, prefix="/price", tags=["Price"])
 # 추가 라우터 예시:
 # from app.api.v1.endpoints import stocks, predictions
 # api_router.include_router(stocks.router, prefix="/stocks", tags=["Stocks"])
