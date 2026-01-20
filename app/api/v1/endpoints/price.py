@@ -56,15 +56,13 @@ async def stream_price_updates(
     async def event_generator():
         """SSE 이벤트 생성기"""
         try:
-            # 초기 가격 전송
+            # 초기 가격 전송 (전체 데이터)
             for stock_code in subscribed_stocks:
                 cached_price = price_cache.get(stock_code)
                 if cached_price:
-                    yield format_sse_event("price_update", {
-                        "stock_code": stock_code,
-                        "current_price": cached_price.current_price,
-                        "timestamp": cached_price.timestamp.isoformat(),
-                    })
+                    data = cached_price.model_dump()
+                    data["timestamp"] = cached_price.timestamp.isoformat()
+                    yield format_sse_event("price_update", data)
             
             # 주기적으로 가격 체크 및 업데이트 전송
             last_prices = {}
@@ -87,14 +85,12 @@ async def stream_price_updates(
                         current_price = cached_price.current_price
                         last_price = last_prices.get(stock_code)
                         
-                        # 가격이 변경되었거나 처음이면 전송
+                        # 가격이 변경되었거나 처음이면 전송 (전체 데이터)
                         if last_price != current_price or stock_code not in last_prices:
                             last_prices[stock_code] = current_price
-                            yield format_sse_event("price_update", {
-                                "stock_code": stock_code,
-                                "current_price": current_price,
-                                "timestamp": cached_price.timestamp.isoformat(),
-                            })
+                            data = cached_price.model_dump()
+                            data["timestamp"] = cached_price.timestamp.isoformat()
+                            yield format_sse_event("price_update", data)
                 
         except asyncio.CancelledError:
             logger.info(f"SSE client disconnected: {client_id}")
