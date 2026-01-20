@@ -4,22 +4,35 @@
 
 from datetime import datetime, time, date
 from typing import Optional
+from zoneinfo import ZoneInfo
+
+
+# 한국 시간대 (KST, UTC+9)
+KST = ZoneInfo("Asia/Seoul")
 
 
 def is_market_open(check_time: Optional[datetime] = None) -> bool:
     """
     장중 여부 확인
     
-    한국 주식시장: 평일 09:00 ~ 15:30
+    한국 주식시장: 평일 09:00 ~ 15:30 (KST)
     
     Args:
-        check_time: 확인할 시각 (None이면 현재 시각)
+        check_time: 확인할 시각 (None이면 현재 시각, KST 기준)
     
     Returns:
         장중이면 True, 아니면 False
     """
     if check_time is None:
-        check_time = datetime.now()
+        # 현재 시각을 KST로 가져오기
+        check_time = datetime.now(KST)
+    else:
+        # check_time이 timezone-aware가 아니면 KST로 변환
+        if check_time.tzinfo is None:
+            check_time = check_time.replace(tzinfo=KST)
+        # 다른 timezone이면 KST로 변환
+        elif check_time.tzinfo != KST:
+            check_time = check_time.astimezone(KST)
     
     # 주말 체크 (토요일=5, 일요일=6)
     if check_time.weekday() >= 5:
