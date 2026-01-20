@@ -2,9 +2,11 @@
 주식 관련 스키마
 """
 
+from datetime import date
+
 from pydantic import BaseModel, Field
 from app.core.enums import StrategyStatus
-
+from app.database.database.stocks import Exchange, StockStatus
 
 class CreateStrategyRequest(BaseModel):
     strategy_id: int = Field(..., description="전략 ID")
@@ -44,6 +46,20 @@ class UpdateStrategyResponse(BaseModel):
     status: StrategyStatus
     is_auto: bool
     strategy_info: StrategyInfoDetail
+
+    class Config:
+        from_attributes = True
+
+class StockMetadataResponse(BaseModel):
+    symbol: str
+    name: str
+    exchange: Exchange
+    sector: str | None
+    industry: str | None
+    market_cap: float | None
+    listing_date: date | None
+    status: StockStatus
+    delist_date: date | None
 
     class Config:
         from_attributes = True

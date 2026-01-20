@@ -6,6 +6,7 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database.database.stocks import StockMetadata
 from app.database.database.strategy import UserStrategy
 from app.repositories.stock_repository import StockRepository
 
@@ -95,3 +96,6 @@ class StockService:
 
         await self.repo.delete_user_strategy(user_strategy)
         return True
+
+    async def get_metadata(self, stock_code: str) -> StockMetadata | None:
+        return await self.repo.get_metadata(stock_code)

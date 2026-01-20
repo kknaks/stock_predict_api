@@ -1,30 +1,43 @@
 """
 실시간 가격 데이터 인메모리 캐시
 
-TTL 10분으로 가격 데이터를 메모리에 저장
+매일 18시(KST)까지 가격 데이터를 메모리에 저장
 """
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from typing import Optional, Dict
 from threading import Lock
+from zoneinfo import ZoneInfo
 
 from app.schemas.price import PriceMessage
 
 logger = logging.getLogger(__name__)
 
+KST = ZoneInfo("Asia/Seoul")
+MARKET_CLOSE_HOUR = 18  # 18시까지 캐시 유지
+
 
 class PriceCache:
-    """실시간 가격 데이터 인메모리 캐시 (TTL 10분)"""
-
-    TTL_SECONDS = 600  # 10분
+    """실시간 가격 데이터 인메모리 캐시 (매일 18시 KST까지)"""
 
     def __init__(self):
         # {stock_code: (price_data, expires_at)}
         self._cache: Dict[str, tuple[PriceMessage, datetime]] = {}
         self._lock = Lock()
         self._cleanup_task: Optional[asyncio.Task] = None
+
+    def _get_expires_at(self) -> datetime:
+        """오늘 18시(KST)까지 만료 시간 계산"""
+        now = datetime.now(KST)
+        today_close = now.replace(hour=MARKET_CLOSE_HOUR, minute=0, second=0, microsecond=0)
+
+        # 이미 18시가 지났으면 내일 18시까지
+        if now >= today_close:
+            today_close += timedelta(days=1)
+
+        return today_close
 
     async def start(self) -> None:
         """캐시 시작 및 정리 태스크 시작"""
@@ -51,7 +64,7 @@ class PriceCache:
             price_msg: 가격 메시지
         """
         with self._lock:
-            expires_at = datetime.now() + timedelta(seconds=self.TTL_SECONDS)
+            expires_at = self._get_expires_at()
             self._cache[price_msg.stock_code] = (price_msg, expires_at)
             logger.debug(
                 f"Price cached: stock_code={price_msg.stock_code}, "
@@ -75,8 +88,8 @@ class PriceCache:
 
             price_msg, expires_at = self._cache[stock_code]
 
-            # 만료 확인
-            if datetime.now() >= expires_at:
+            # 만료 확인 (KST 기준)
+            if datetime.now(KST) >= expires_at:
                 del self._cache[stock_code]
                 logger.debug(f"Price expired and removed: stock_code={stock_code}")
                 return None
@@ -92,7 +105,7 @@ class PriceCache:
         """
         with self._lock:
             result = {}
-            now = datetime.now()
+            now = datetime.now(KST)
             expired_keys = []
 
             for stock_code, (price_msg, expires_at) in self._cache.items():
@@ -150,7 +163,7 @@ class PriceCache:
     def _cleanup_expired_items(self) -> None:
         """만료된 항목 제거"""
         with self._lock:
-            now = datetime.now()
+            now = datetime.now(KST)
             expired_keys = [
                 stock_code
                 for stock_code, (_, expires_at) in self._cache.items()

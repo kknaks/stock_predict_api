@@ -14,7 +14,7 @@ from app.database.database.strategy import (
     StrategyStatus,
     DailyStrategy,
 )
-from app.database.database.stocks import StockPrices
+from app.database.database.stocks import StockPrices, StockMetadata
 
 
 class StockRepository:
@@ -130,5 +130,12 @@ class StockRepository:
                 StockPrices.symbol == stock_code,
                 StockPrices.date == target_date
             )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_metadata(self, stock_code: str) -> StockMetadata | None:
+        """종목 메타 정보 조회"""
+        result = await self.db.execute(
+            select(StockMetadata).where(StockMetadata.symbol == stock_code)
         )
         return result.scalar_one_or_none()
