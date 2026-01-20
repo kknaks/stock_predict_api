@@ -63,10 +63,21 @@ class PredictService:
                 pred_dict["current_price"] = current_price
                 predictions.append(PredictionItem(**pred_dict))
             
+            # 후보군 필터링 및 제한 (prediction_handler와 동일한 로직)
+            candidate_predictions = [
+                p for p in predictions
+                if p.gap_rate < 28 and p.prob_up > 0.2
+            ]
+            candidate_predictions = sorted(
+                candidate_predictions, 
+                key=lambda x: x.prob_up, 
+                reverse=True
+            )[:15]
+            
             result.append(
                 StrategyWithPredictions(
                     strategy_info=StrategyInfoSchema.model_validate(strategy),
-                    predictions=predictions
+                    predictions=candidate_predictions
                 )
             )
         
