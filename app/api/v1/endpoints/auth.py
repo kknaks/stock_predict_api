@@ -26,6 +26,8 @@ from app.schemas.auth import (
     UserResponse,
 )
 
+from datetime import timedelta
+
 router = APIRouter()
 
 
@@ -132,8 +134,11 @@ async def login(request: LoginRequest, db: DbSession):
         "nickname": user.nickname,
         "role": user.role.value,
     }
-    
-    access_token = create_access_token(token_data)
+
+    # test
+    expires_delta = timedelta(seconds=10)
+    access_token = create_access_token(token_data, expires_delta)
+    # access_token = create_access_token(token_data)
     refresh_token = create_refresh_token(token_data)
     
     # DB에 토큰 저장
@@ -164,7 +169,7 @@ async def refresh_token(request: RefreshTokenRequest, db: DbSession):
     
     # 사용자 조회
     result = await db.execute(
-        select(Users).where(Users.uid == payload.get("sub"))
+        select(Users).where(Users.uid == int(payload.get("sub")))
     )
     user = result.scalar_one_or_none()
     

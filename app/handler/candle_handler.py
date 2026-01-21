@@ -1,15 +1,14 @@
 """
 시간봉 캔들 생성 핸들러
 
-STOP 신호를 받으면 캐시에서 틱 데이터를 가져와 1시간봉으로 변환 후 DB 저장
+STOP 신호를 받으면 캐시에 남아있는 마지막 시간 데이터를 시간봉으로 변환 후 DB 저장
 """
 
 import logging
-from collections import defaultdict
 from datetime import datetime, date
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.config.db_connections import get_session_factory
@@ -19,6 +18,8 @@ from app.kafka.websocket_command_consumer import WebSocketCommandMessage
 from app.database.database.strategy import HourCandleData
 
 logger = logging.getLogger(__name__)
+
+KST = ZoneInfo("Asia/Seoul")
 
 
 class HourCandleAggregator:
@@ -62,67 +63,31 @@ class HourCandleAggregator:
         }
 
 
-def parse_trade_time_hour(trade_time: str) -> Optional[int]:
-    """
-    체결 시간에서 시간(hour) 추출
-
-    Args:
-        trade_time: HHMMSS 형식 (예: "093015")
-
-    Returns:
-        시간 (9, 10, 11, ..., 15) 또는 None
-    """
-    try:
-        if len(trade_time) >= 2:
-            return int(trade_time[:2])
-    except (ValueError, TypeError):
-        pass
-    return None
-
-
-def aggregate_ticks_to_hour_candles(
+def aggregate_ticks_to_candle(
     stock_code: str,
     ticks: List[PriceMessage],
-    candle_date: date
-) -> Dict[int, dict]:
-    """
-    틱 데이터를 시간별로 집계
+    candle_date: date,
+    hour: int
+) -> Optional[dict]:
+    """틱 데이터를 단일 시간봉으로 집계"""
+    if not ticks:
+        return None
 
-    Args:
-        stock_code: 종목 코드
-        ticks: 틱 데이터 리스트
-        candle_date: 캔들 날짜
-
-    Returns:
-        {hour: candle_dict} 딕셔너리
-    """
-    # 시간별 aggregator
-    aggregators: Dict[int, HourCandleAggregator] = defaultdict(HourCandleAggregator)
+    aggregator = HourCandleAggregator()
 
     for tick in ticks:
-        hour = parse_trade_time_hour(tick.trade_time)
-        if hour is None:
-            continue
-
-        # 장 시간 필터 (09:00 ~ 15:30)
-        if hour < 9 or hour > 15:
-            continue
-
         try:
             price = float(tick.current_price)
             volume = int(tick.trade_volume)
-            aggregators[hour].add_tick(price, volume)
+            aggregator.add_tick(price, volume)
         except (ValueError, TypeError) as e:
             logger.warning(f"Invalid tick data: {e}")
             continue
 
-    # 결과 변환
-    result = {}
-    for hour, agg in aggregators.items():
-        if agg.trade_count > 0:
-            result[hour] = agg.to_dict(stock_code, candle_date, hour)
+    if aggregator.trade_count == 0:
+        return None
 
-    return result
+    return aggregator.to_dict(stock_code, candle_date, hour)
 
 
 class CandleHandler:
@@ -134,7 +99,7 @@ class CandleHandler:
 
     async def handle_stop_command(self, command_msg: WebSocketCommandMessage) -> None:
         """
-        STOP 명령 처리 - 캐시 데이터를 시간봉으로 변환 후 DB 저장
+        STOP 명령 처리 - 캐시에 남아있는 마지막 시간 데이터를 시간봉으로 변환 후 DB 저장
 
         Args:
             command_msg: 웹소켓 명령 메시지
@@ -145,58 +110,55 @@ class CandleHandler:
         logger.info(f"Processing STOP command: {command_msg}")
 
         try:
-            # 캐시에서 모든 틱 데이터 가져오기
-            all_ticks = self._price_cache.get_all_ticks()
+            # 캐시에서 마지막 시간 데이터 추출 및 삭제
+            current_hour, hour_data = self._price_cache.extract_all_data()
 
-            if not all_ticks:
+            if not hour_data or current_hour is None:
                 logger.info("No tick data in cache to process")
+                return
+
+            # 장 시간 필터 (09:00 ~ 15:30)
+            if current_hour < 9 or current_hour > 15:
+                logger.info(f"Skipping hour {current_hour} (outside market hours)")
                 return
 
             # 캐시 날짜 확인
             cache_date = self._price_cache.get_cache_date()
             if cache_date is None:
-                cache_date = datetime.now().date()
+                cache_date = datetime.now(KST).date()
 
             logger.info(
-                f"Processing tick data: "
-                f"{len(all_ticks)} stocks, "
-                f"{sum(len(t) for t in all_ticks.values())} total ticks, "
-                f"date={cache_date}"
+                f"Processing last hour data: hour={current_hour}, "
+                f"date={cache_date}, stocks={len(hour_data)}, "
+                f"total_ticks={sum(len(t) for t in hour_data.values())}"
             )
 
             # 종목별로 시간봉 생성
-            all_candles = []
-            for stock_code, ticks in all_ticks.items():
-                candles = aggregate_ticks_to_hour_candles(stock_code, ticks, cache_date)
-                all_candles.extend(candles.values())
-                logger.debug(f"Generated {len(candles)} hour candles for {stock_code}")
+            candles = []
+            for stock_code, ticks in hour_data.items():
+                candle = aggregate_ticks_to_candle(stock_code, ticks, cache_date, current_hour)
+                if candle:
+                    candles.append(candle)
 
-            if not all_candles:
+            if not candles:
                 logger.info("No candles generated from tick data")
                 return
 
             # DB에 저장
-            await self._save_candles_to_db(all_candles)
-
-            logger.info(f"Successfully saved {len(all_candles)} hour candles to database")
+            await self._save_candles_to_db(candles)
+            logger.info(f"Successfully saved {len(candles)} hour candles for hour {current_hour}")
 
         except Exception as e:
             logger.error(f"Error processing STOP command: {e}", exc_info=True)
 
     async def _save_candles_to_db(self, candles: List[dict]) -> None:
-        """
-        시간봉 데이터를 DB에 저장 (upsert)
-
-        Args:
-            candles: 캔들 데이터 리스트
-        """
+        """시간봉 데이터를 DB에 저장 (upsert)"""
         if HourCandleData is None:
             logger.error("HourCandleData model not available")
             return
 
         async with self._session_factory() as session:
             try:
-                # PostgreSQL upsert (ON CONFLICT DO UPDATE)
                 stmt = insert(HourCandleData).values(candles)
                 stmt = stmt.on_conflict_do_update(
                     constraint='uq_hour_candle_stock_date_hour',
