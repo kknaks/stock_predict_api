@@ -18,10 +18,7 @@ from app.config.db_connections import get_db
 from app.handler.price_handler import aggregate_ticks_to_candle
 
 # stock_predict_database 모델 import
-try:
-    from database.strategy import HourCandleData
-except ImportError:
-    HourCandleData = None
+from app.database.database.strategy import HourCandleData
 
 logger = logging.getLogger(__name__)
 
@@ -142,9 +139,6 @@ async def get_hour_candles(
     Returns:
         시간봉 데이터 리스트
     """
-    if HourCandleData is None:
-        raise HTTPException(status_code=500, detail="HourCandleData model not available")
-
     # 기본값 설정
     if start_date is None:
         start_date = date.today()
@@ -212,33 +206,32 @@ async def get_today_hour_candles(
     db_hours = set()
 
     # 1. DB에서 오늘 저장된 시간봉 조회
-    if HourCandleData is not None:
-        try:
-            stmt = (
-                select(HourCandleData)
-                .where(HourCandleData.stock_code == stock_code)
-                .where(HourCandleData.candle_date == today)
-                .order_by(HourCandleData.hour)
-            )
+    try:
+        stmt = (
+            select(HourCandleData)
+            .where(HourCandleData.stock_code == stock_code)
+            .where(HourCandleData.candle_date == today)
+            .order_by(HourCandleData.hour)
+        )
 
-            result = await db.execute(stmt)
-            db_candles = result.scalars().all()
+        result = await db.execute(stmt)
+        db_candles = result.scalars().all()
 
-            for c in db_candles:
-                all_candles.append({
-                    "candle_date": c.candle_date.isoformat(),
-                    "hour": c.hour,
-                    "open": c.open,
-                    "high": c.high,
-                    "low": c.low,
-                    "close": c.close,
-                    "volume": c.volume,
-                    "trade_count": c.trade_count,
-                })
-                db_hours.add(c.hour)
+        for c in db_candles:
+            all_candles.append({
+                "candle_date": c.candle_date.isoformat(),
+                "hour": c.hour,
+                "open": c.open,
+                "high": c.high,
+                "low": c.low,
+                "close": c.close,
+                "volume": c.volume,
+                "trade_count": c.trade_count,
+            })
+            db_hours.add(c.hour)
 
-        except Exception as e:
-            logger.error(f"Error fetching today's hour candles from DB: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Error fetching today's hour candles from DB: {e}", exc_info=True)
 
     # 2. 캐시에서 현재 시간 틱 데이터 조회 및 시간봉 계산
     current_hour = price_cache.get_current_hour()

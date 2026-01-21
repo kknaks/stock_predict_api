@@ -5,13 +5,16 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.strategy_repository import StrategyRepository
+from app.repositories.account_repository import AccountRepository
 from app.schemas.td_position import (
     TdPositionResponse,
+    AccountPositionResponse,
     TdPositionSummary,
     StockPosition,
     PositionStatus,
 )
-from app.database.database.strategy import OrderType
+from app.schemas.users import CreateStrategyRequest, UpdateStrategyRequest
+from app.database.database.strategy import StrategyStatus, UserStrategy
 from app.services.price_cache import get_price_cache
 
 logger = logging.getLogger(__name__)
@@ -23,28 +26,50 @@ class StrategyService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.repo = StrategyRepository(db)
+        self.account_repo = AccountRepository(db)
 
     async def get_td_position(self, user_id: int, date_str: str) -> TdPositionResponse:
         """
-        당일 포지션 조회
+        당일 포지션 조회 (사용자의 모든 계좌)
 
         Args:
             user_id: 사용자 ID
             date_str: 조회 날짜 (YYYY-MM-DD)
 
         Returns:
-            TdPositionResponse
+            TdPositionResponse (계좌별 포지션)
         """
         target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
 
-        # 1. DB에서 DailyStrategy 및 종목 정보 조회
-        daily_strategy, stocks = await self.repo.get_td_position(user_id, target_date)
+        # 1. 사용자의 모든 계좌 조회
+        accounts = await self.account_repo.get_by_user_uid(user_id)
+
+        account_positions = []
+        for account in accounts:
+            position = await self._get_account_position(account, target_date, date_str)
+            account_positions.append(position)
+
+        return TdPositionResponse(
+            date=date_str,
+            accounts=account_positions,
+        )
+
+    async def _get_account_position(
+        self,
+        account,
+        target_date,
+        date_str: str
+    ) -> AccountPositionResponse:
+        """개별 계좌의 포지션 조회"""
+        # DB에서 DailyStrategy 및 종목 정보 조회
+        daily_strategy, stocks = await self.repo.get_td_position(account.id, target_date)
 
         # 데이터 없는 경우 빈 응답
         if not daily_strategy:
-            return TdPositionResponse(
-                user_id=user_id,
-                date=date_str,
+            return AccountPositionResponse(
+                account_id=account.id,
+                account_number=account.account_number,
+                account_name=account.account_name or "",
                 daily_strategy_id=None,
                 summary=TdPositionSummary(),
                 positions=[],
@@ -176,9 +201,10 @@ class StrategyService:
             total_stop_loss_count=stop_loss_count,
         )
 
-        return TdPositionResponse(
-            user_id=user_id,
-            date=date_str,
+        return AccountPositionResponse(
+            account_id=account.id,
+            account_number=account.account_number,
+            account_name=account.account_name or "",
             daily_strategy_id=daily_strategy.id,
             summary=summary,
             positions=positions,
@@ -225,3 +251,88 @@ class StrategyService:
 
         # 일반 매도
         return PositionStatus.SOLD
+
+    async def update_strategy(
+        self,
+        strategy_id: int,
+        account_id: int,
+        request: UpdateStrategyRequest
+    ) -> Optional[UserStrategy]:
+        """
+        전략 업데이트
+
+        Args:
+            strategy_id: UserStrategy ID
+            account_id: 계좌 ID
+            request: 업데이트 요청
+
+        Returns:
+            업데이트된 UserStrategy 또는 None
+        """
+        # 요청 데이터를 딕셔너리로 변환 (None이 아닌 값만)
+        update_data = {}
+
+        if request.investment_weight is not None:
+            update_data["investment_weight"] = request.investment_weight
+        if request.ls_ratio is not None:
+            update_data["ls_ratio"] = request.ls_ratio
+        if request.tp_ratio is not None:
+            update_data["tp_ratio"] = request.tp_ratio
+        if request.is_auto is not None:
+            update_data["is_auto"] = request.is_auto
+        if request.status is not None:
+            update_data["status"] = request.status
+        if request.strategy_weight_type_id is not None:
+            update_data["weight_type_id"] = request.strategy_weight_type_id
+
+        # ACTIVE로 변경하려는 경우, 다른 전략들을 INACTIVE로 변경
+        if request.status == StrategyStatus.ACTIVE:
+            await self.repo.deactivate_other_strategies(account_id, strategy_id)
+
+        return await self.repo.update_user_strategy(strategy_id, account_id, update_data)
+
+    async def delete_strategy(self, strategy_id: int, account_id: int) -> bool:
+        """
+        전략 삭제 (소프트 삭제)
+
+        Args:
+            strategy_id: UserStrategy ID
+            account_id: 계좌 ID
+
+        Returns:
+            성공 여부
+        """
+        return await self.repo.soft_delete_user_strategy(strategy_id, account_id)
+
+    async def get_all_strategy_info(self):
+        """전략 정보 목록 조회"""
+        return await self.repo.get_all_strategy_info()
+
+    async def get_all_strategy_weight_types(self):
+        """가중치 타입 목록 조회"""
+        return await self.repo.get_all_strategy_weight_types()
+
+    async def create_strategy(
+        self,
+        account_id: int,
+        request: CreateStrategyRequest
+    ) -> UserStrategy:
+        """
+        전략 생성
+
+        Args:
+            account_id: 계좌 ID
+            request: 생성 요청
+
+        Returns:
+            생성된 UserStrategy
+        """
+        return await self.repo.create_user_strategy(
+            account_id=account_id,
+            strategy_id=request.strategy_id,
+            investment_weight=request.investment_weight,
+            ls_ratio=request.ls_ratio,
+            tp_ratio=request.tp_ratio,
+            is_auto=request.is_auto,
+            weight_type_id=request.strategy_weight_type_id,
+        )

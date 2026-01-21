@@ -13,11 +13,11 @@ class DailyHistory(BaseModel):
     sell_amount: float = Field(0, description="매도 금액")
 
 
-class HistoryResponse(BaseModel):
-    """월별 히스토리 응답"""
-    user_id: int = Field(..., description="사용자 ID")
-    year: int = Field(..., description="연도")
-    month: int = Field(..., description="월")
+class AccountHistoryResponse(BaseModel):
+    """계좌별 월간 히스토리 응답"""
+    account_id: int = Field(..., description="계좌 ID")
+    account_number: str = Field(..., description="계좌번호")
+    account_name: str = Field(..., description="계좌명")
 
     # 월간 요약
     total_profit_rate: float = Field(0, description="월간 총 수익률 (%)")
@@ -30,6 +30,19 @@ class HistoryResponse(BaseModel):
     daily_histories: List[DailyHistory] = Field(
         default_factory=list,
         description="일별 히스토리 목록"
+    )
+
+    class Config:
+        from_attributes = True
+
+
+class HistoryResponse(BaseModel):
+    """월별 히스토리 응답 (전체 계좌)"""
+    year: int = Field(..., description="연도")
+    month: int = Field(..., description="월")
+    accounts: List[AccountHistoryResponse] = Field(
+        default_factory=list,
+        description="계좌별 히스토리 목록"
     )
 
     class Config:

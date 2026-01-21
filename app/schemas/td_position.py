@@ -71,21 +71,30 @@ class TdPositionSummary(BaseModel):
     total_stop_loss_count: int = Field(0, description="손절 종목 수")
 
 
-class TdPositionResponse(BaseModel):
-    """잔고 조회 응답"""
-    # 조회 기준
-    user_id: int = Field(..., description="사용자 ID")
-    date: str = Field(..., description="조회 날짜 (YYYY-MM-DD)")
+class AccountPositionResponse(BaseModel):
+    """계좌별 포지션 응답"""
+    account_id: int = Field(..., description="계좌 ID")
+    account_number: str = Field(..., description="계좌번호")
+    account_name: str = Field(..., description="계좌명")
     daily_strategy_id: Optional[int] = Field(None, description="일별 전략 ID")
 
     # 요약 정보
-    summary: TdPositionSummary = Field(..., description="잔고 요약")
+    summary: TdPositionSummary = Field(default_factory=TdPositionSummary, description="잔고 요약")
 
     # 종목별 상세
     positions: List[StockPosition] = Field(default_factory=list, description="종목별 포지션")
 
     # 메타 정보
     updated_at: Optional[datetime] = Field(None, description="마지막 업데이트 시각")
+
+    class Config:
+        from_attributes = True
+
+
+class TdPositionResponse(BaseModel):
+    """당일 포지션 조회 응답 (전체 계좌)"""
+    date: str = Field(..., description="조회 날짜 (YYYY-MM-DD)")
+    accounts: List[AccountPositionResponse] = Field(default_factory=list, description="계좌별 포지션")
 
     class Config:
         from_attributes = True

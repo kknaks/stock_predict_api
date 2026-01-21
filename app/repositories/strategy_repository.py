@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
@@ -10,10 +10,9 @@ from app.database.database.strategy import (
     DailyStrategyStock,
     UserStrategy,
     Order,
-    OrderExecution,
     StrategyStatus,
-    OrderStatus,
-    OrderType,
+    StrategyInfo,
+    StrategyWeightType,
 )
 
 
@@ -23,12 +22,13 @@ class StrategyRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_user_active_strategies(self, user_id: int) -> List[UserStrategy]:
-        """사용자의 활성 전략 목록 조회"""
+    async def get_account_active_strategies(self, account_id: int) -> List[UserStrategy]:
+        """계좌의 활성 전략 목록 조회"""
         result = await self.db.execute(
             select(UserStrategy).where(
-                UserStrategy.user_id == user_id,
+                UserStrategy.account_id == account_id,
                 UserStrategy.status == StrategyStatus.ACTIVE,
+                UserStrategy.is_deleted == False,
             )
         )
         return list(result.scalars().all())
@@ -53,26 +53,26 @@ class StrategyRepository:
 
     async def get_td_position(
         self,
-        user_id: int,
+        account_id: int,
         target_date: date
     ) -> Tuple[Optional[DailyStrategy], List[DailyStrategyStock]]:
         """
         당일 포지션 조회
 
         Args:
-            user_id: 사용자 ID
+            account_id: 계좌 ID
             target_date: 조회 날짜
 
         Returns:
             (DailyStrategy, List[DailyStrategyStock]) 튜플
         """
-        # 1. 사용자의 활성 전략 조회
-        user_strategies = await self.get_user_active_strategies(user_id)
+        # 1. 계좌의 활성 전략 조회
+        user_strategies = await self.get_account_active_strategies(account_id)
 
         if not user_strategies:
             return None, []
 
-        # 첫 번째 활성 전략 사용 (추후 여러 전략 지원 시 수정)
+        # 첫 번째 활성 전략 사용 (계좌당 하나의 ACTIVE 전략만 가능)
         user_strategy = user_strategies[0]
 
         # 2. 해당 날짜의 DailyStrategy 조회 (stocks, orders 포함)
@@ -183,3 +183,178 @@ class StrategyRepository:
             .order_by(DailyStrategy.timestamp.asc())
         )
         return list(result.scalars().all())
+
+    async def get_user_strategy_by_id(
+        self,
+        strategy_id: int,
+        account_id: int
+    ) -> Optional[UserStrategy]:
+        """
+        전략 조회 (계좌 소유 확인)
+
+        Args:
+            strategy_id: UserStrategy ID
+            account_id: 계좌 ID
+
+        Returns:
+            UserStrategy 또는 None
+        """
+        result = await self.db.execute(
+            select(UserStrategy)
+            .options(
+                selectinload(UserStrategy.strategy_info),
+                selectinload(UserStrategy.strategy_weight_type),
+            )
+            .where(
+                UserStrategy.id == strategy_id,
+                UserStrategy.account_id == account_id,
+                UserStrategy.is_deleted == False,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def update_user_strategy(
+        self,
+        strategy_id: int,
+        account_id: int,
+        update_data: Dict[str, Any]
+    ) -> Optional[UserStrategy]:
+        """
+        전략 업데이트
+
+        Args:
+            strategy_id: UserStrategy ID
+            account_id: 계좌 ID
+            update_data: 업데이트할 필드들
+
+        Returns:
+            업데이트된 UserStrategy 또는 None (권한 없음)
+        """
+        user_strategy = await self.get_user_strategy_by_id(strategy_id, account_id)
+
+        if not user_strategy:
+            return None
+
+        # 필드 업데이트
+        for key, value in update_data.items():
+            if hasattr(user_strategy, key) and value is not None:
+                setattr(user_strategy, key, value)
+
+        await self.db.commit()
+        await self.db.refresh(user_strategy)
+
+        return user_strategy
+
+    async def deactivate_other_strategies(
+        self,
+        account_id: int,
+        exclude_strategy_id: int
+    ) -> None:
+        """
+        다른 전략들을 INACTIVE로 변경 (계좌당 하나의 ACTIVE 전략만 유지)
+
+        Args:
+            account_id: 계좌 ID
+            exclude_strategy_id: 제외할 전략 ID (ACTIVE로 유지)
+        """
+        result = await self.db.execute(
+            select(UserStrategy).where(
+                UserStrategy.account_id == account_id,
+                UserStrategy.id != exclude_strategy_id,
+                UserStrategy.status == StrategyStatus.ACTIVE,
+                UserStrategy.is_deleted == False,
+            )
+        )
+        strategies = result.scalars().all()
+
+        for strategy in strategies:
+            strategy.status = StrategyStatus.INACTIVE
+
+    async def soft_delete_user_strategy(
+        self,
+        strategy_id: int,
+        account_id: int
+    ) -> bool:
+        """
+        전략 소프트 삭제
+
+        Args:
+            strategy_id: UserStrategy ID
+            account_id: 계좌 ID
+
+        Returns:
+            성공 여부
+        """
+        user_strategy = await self.get_user_strategy_by_id(strategy_id, account_id)
+
+        if not user_strategy:
+            return False
+
+        user_strategy.is_auto = False
+        user_strategy.status = StrategyStatus.INACTIVE
+        user_strategy.is_deleted = True
+
+        await self.db.commit()
+        return True
+
+    async def get_all_strategy_info(self) -> List[StrategyInfo]:
+        """전략 정보 목록 조회"""
+        result = await self.db.execute(select(StrategyInfo))
+        return list(result.scalars().all())
+
+    async def get_all_strategy_weight_types(self) -> List[StrategyWeightType]:
+        """가중치 타입 목록 조회"""
+        result = await self.db.execute(select(StrategyWeightType))
+        return list(result.scalars().all())
+
+    async def create_user_strategy(
+        self,
+        account_id: int,
+        strategy_id: int,
+        investment_weight: float,
+        ls_ratio: float,
+        tp_ratio: float,
+        is_auto: bool,
+        weight_type_id: Optional[int] = None
+    ) -> UserStrategy:
+        """
+        전략 생성
+
+        Args:
+            account_id: 계좌 ID
+            strategy_id: 전략 정보 ID
+            investment_weight: 투자 비중
+            ls_ratio: 손절 비율
+            tp_ratio: 익절 비율
+            is_auto: 자동 매매 여부
+            weight_type_id: 가중치 타입 ID
+
+        Returns:
+            생성된 UserStrategy
+        """
+        user_strategy = UserStrategy(
+            account_id=account_id,
+            strategy_id=strategy_id,
+            investment_weight=investment_weight,
+            ls_ratio=ls_ratio,
+            tp_ratio=tp_ratio,
+            is_auto=is_auto,
+            weight_type_id=weight_type_id,
+            status=StrategyStatus.INACTIVE,
+            is_deleted=False,
+        )
+
+        self.db.add(user_strategy)
+        await self.db.commit()
+        await self.db.refresh(user_strategy)
+
+        # relationship 로드
+        result = await self.db.execute(
+            select(UserStrategy)
+            .options(
+                selectinload(UserStrategy.strategy_info),
+                selectinload(UserStrategy.strategy_weight_type),
+            )
+            .where(UserStrategy.id == user_strategy.id)
+        )
+        return result.scalar_one()

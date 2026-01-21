@@ -1,26 +1,29 @@
 from datetime import datetime, date
 from calendar import monthrange
+from typing import List
 
 from app.repositories.strategy_repository import StrategyRepository
+from app.repositories.account_repository import AccountRepository
 from app.api.deps import DbSession
-from app.schemas.history import HistoryResponse, DailyHistory
+from app.schemas.history import HistoryResponse, AccountHistoryResponse, DailyHistory
 
 
 class HistoryService:
     def __init__(self, db: DbSession):
         self.db = db
         self.repo = StrategyRepository(db)
+        self.account_repo = AccountRepository(db)
 
     async def get_monthly_history(self, user_id: int, date_str: str) -> HistoryResponse:
         """
-        월별 히스토리 조회
+        월별 히스토리 조회 (사용자의 모든 계좌)
 
         Args:
             user_id: 사용자 ID
             date_str: 조회 기준 날짜 (YYYY-MM-DD)
 
         Returns:
-            HistoryResponse: 월별 히스토리 데이터
+            HistoryResponse: 계좌별 월간 히스토리 데이터
         """
         # 날짜 파싱
         target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
@@ -32,21 +35,44 @@ class HistoryService:
         _, last_day = monthrange(year, month)
         month_end = date(year, month, last_day)
 
-        # 사용자의 활성 전략 조회
-        user_strategies = await self.repo.get_user_active_strategies(user_id)
-        if not user_strategies:
-            return HistoryResponse(
-                user_id=user_id,
-                year=year,
-                month=month,
-                daily_histories=[],
+        # 사용자의 모든 계좌 조회
+        accounts = await self.account_repo.get_by_user_uid(user_id)
+
+        account_histories = []
+        for account in accounts:
+            history = await self._get_account_history(
+                account, month_start, month_end
+            )
+            account_histories.append(history)
+
+        return HistoryResponse(
+            year=year,
+            month=month,
+            accounts=account_histories,
+        )
+
+    async def _get_account_history(
+        self,
+        account,
+        month_start: date,
+        month_end: date
+    ) -> AccountHistoryResponse:
+        """개별 계좌의 월간 히스토리 조회"""
+        # 계좌의 전략 조회 (삭제되지 않은 것만)
+        strategies = await self.repo.get_account_active_strategies(account.id)
+
+        if not strategies:
+            return AccountHistoryResponse(
+                account_id=account.id,
+                account_number=account.account_number,
+                account_name=account.account_name or "",
             )
 
-        user_strategy_ids = [us.id for us in user_strategies]
+        strategy_ids = [s.id for s in strategies]
 
         # 월별 DailyStrategy 조회
         daily_strategies = await self.repo.get_monthly_daily_strategies(
-            user_strategy_ids, month_start, month_end
+            strategy_ids, month_start, month_end
         )
 
         # 일별 히스토리 생성
@@ -89,10 +115,10 @@ class HistoryService:
                 )
             )
 
-        return HistoryResponse(
-            user_id=user_id,
-            year=year,
-            month=month,
+        return AccountHistoryResponse(
+            account_id=account.id,
+            account_number=account.account_number,
+            account_name=account.account_name or "",
             total_profit_rate=round(cumulative_profit_rate, 2),
             total_profit_amount=round(cumulative_profit_amount, 0),
             total_buy_amount=round(total_buy_amount, 0),
