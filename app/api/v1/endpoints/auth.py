@@ -136,9 +136,9 @@ async def login(request: LoginRequest, db: DbSession):
     }
 
     # test
-    expires_delta = timedelta(seconds=10)
-    access_token = create_access_token(token_data, expires_delta)
-    # access_token = create_access_token(token_data)
+    # expires_delta = timedelta(seconds=10)
+    # access_token = create_access_token(token_data, expires_delta)
+    access_token = create_access_token(token_data)
     refresh_token = create_refresh_token(token_data)
     
     # DB에 토큰 저장
