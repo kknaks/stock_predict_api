@@ -85,12 +85,12 @@ class KafkaPriceConsumer:
                     data = json.loads(msg.value)
                     price_msg = PriceMessage(**data)
 
-                    logger.debug(
-                        f"Received price data: "
-                        f"stock_code={price_msg.stock_code}, "
-                        f"current_price={price_msg.current_price}, "
-                        f"timestamp={price_msg.timestamp}"
-                    )
+                    # logger.debug(
+                    #     f"Received price data: "
+                    #     f"stock_code={price_msg.stock_code}, "
+                    #     f"current_price={price_msg.current_price}, "
+                    #     f"timestamp={price_msg.timestamp}"
+                    # )
 
                     # 등록된 핸들러들 호출
                     for handler in self._handlers:

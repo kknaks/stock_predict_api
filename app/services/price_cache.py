@@ -71,11 +71,11 @@ class PriceCache:
 
             self._cache[stock_code].append(price_msg)
 
-            logger.debug(
-                f"Price cached: stock_code={stock_code}, "
-                f"current_price={price_msg.current_price}, "
-                f"total_ticks={len(self._cache[stock_code])}"
-            )
+            # logger.debug(
+            #     f"Price cached: stock_code={stock_code}, "
+            #     f"current_price={price_msg.current_price}, "
+            #     f"total_ticks={len(self._cache[stock_code])}"
+            # )
 
     def get(self, stock_code: str) -> Optional[PriceMessage]:
         """

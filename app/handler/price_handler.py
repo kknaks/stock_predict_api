@@ -28,10 +28,10 @@ class PriceHandler:
         try:
             # 메모리 캐시에 저장 (TTL 10분)
             self._price_cache.set(price_msg)
-            logger.debug(
-                f"Price saved to cache: stock_code={price_msg.stock_code}, "
-                f"current_price={price_msg.current_price}"
-            )
+            # logger.debug(
+            #     f"Price saved to cache: stock_code={price_msg.stock_code}, "
+            #     f"current_price={price_msg.current_price}"
+            # )
         except Exception as e:
             logger.error(f"Error handling price message: {e}", exc_info=True)
 
