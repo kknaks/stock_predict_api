@@ -63,6 +63,7 @@ class StrategyService:
         holding_eval_amount = 0.0
 
         # 카운트
+        not_purchased_count = 0
         holding_count = 0
         sold_count = 0
         target_reached_count = 0
@@ -105,7 +106,9 @@ class StrategyService:
             # TODO: PriceCache에 없으면 DB에서 종가(close_price) 조회하는 로직 추가
 
             # 상태별 집계
-            if status == PositionStatus.HOLDING:
+            if status == PositionStatus.NOT_PURCHASED:
+                not_purchased_count += 1
+            elif status == PositionStatus.HOLDING:
                 holding_count += 1
                 # 보유 중인 종목의 매입금액
                 if buy_amount:
@@ -190,16 +193,24 @@ class StrategyService:
         """
         포지션 상태 결정
 
+        - 매수 실패: 매수하지 못한 경우 (buy_price가 None이거나 buy_quantity가 0)
         - 보유 중: 매도 안 함
         - 목표가 도달: 매도가 >= 목표가
         - 손절: 매도가 <= 손절가
         - 매도 완료: 그 외 매도 완료
         """
-        # 아직 매도 안 함
-        if holding_quantity > 0 or not stock.sell_price:
+        # 매수하지 못한 경우 (buy_price가 None이거나 buy_quantity가 0)
+        if not stock.buy_price or not stock.buy_quantity or stock.buy_quantity == 0:
+            return PositionStatus.NOT_PURCHASED
+
+        # 보유 중인 경우
+        if holding_quantity > 0:
             return PositionStatus.HOLDING
 
-        # 매도 완료 시 상태 판별
+        # 매도 완료 시 상태 판별 (holding_quantity가 0이고 sell_price가 있는 경우)
+        if not stock.sell_price:
+            return PositionStatus.HOLDING  # 매도가 없으면 아직 보유 중으로 간주
+
         sell_price = stock.sell_price
         target_price = stock.target_price
         stop_loss_price = stock.stop_loss_price

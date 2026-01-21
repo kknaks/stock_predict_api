@@ -69,7 +69,7 @@ class DailyStrategyHandler:
                             stock_open=float(stock_data.stock_open), # TODO: int로 바꾸기
                             target_price=stock_data.target_price,
                             target_quantity=stock_data.target_quantity,
-                            sell_price=stock_data.sell_price,
+                            target_sell_price=stock_data.target_sell_price,
                             stop_loss_price=stock_data.stop_loss_price,
                         )
                         session.add(daily_strategy_stock)

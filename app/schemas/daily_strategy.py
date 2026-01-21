@@ -11,7 +11,7 @@ class DailyStrategyStock(BaseModel):
     stock_open: int
     target_price: Optional[float] = None
     target_quantity: Optional[int] = None
-    sell_price: Optional[float] = None
+    target_sell_price: Optional[float] = None
     stop_loss_price: Optional[float] = None
     gap_rate: Optional[float] = None
     take_profit_target: Optional[float] = None
@@ -19,7 +19,7 @@ class DailyStrategyStock(BaseModel):
     signal: str
     created_at: datetime
 
-    @field_validator('target_price', 'sell_price', 'take_profit_target', 'prob_up', mode='before')
+    @field_validator('target_price', 'target_sell_price', 'take_profit_target', 'prob_up', mode='before')
     @classmethod
     def parse_string_to_float(cls, v):
         """문자열로 된 숫자를 float로 변환"""

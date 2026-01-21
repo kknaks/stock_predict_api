@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 class PositionStatus(str, Enum):
     """포지션 상태"""
+    NOT_PURCHASED = "not_purchased"  # 매수 실패 (못 산 경우)
     HOLDING = "holding"              # 보유 중
     TARGET_REACHED = "target_reached"  # 목표가 도달 (익절)
     STOP_LOSS = "stop_loss"          # 손절
