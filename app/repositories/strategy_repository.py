@@ -2,7 +2,7 @@ from datetime import date
 from typing import Optional, List, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
 
 from app.database.database.strategy import (
@@ -150,3 +150,36 @@ class StrategyRepository:
             'holding_count': row.holding_count or 0,
             'sold_count': row.sold_count or 0,
         }
+
+    async def get_monthly_daily_strategies(
+        self,
+        user_strategy_ids: List[int],
+        start_date: date,
+        end_date: date
+    ) -> List[DailyStrategy]:
+        """
+        월별 DailyStrategy 목록 조회
+
+        Args:
+            user_strategy_ids: 사용자 전략 ID 목록
+            start_date: 시작일
+            end_date: 종료일
+
+        Returns:
+            DailyStrategy 목록 (날짜 순 정렬)
+        """
+        if not user_strategy_ids:
+            return []
+
+        result = await self.db.execute(
+            select(DailyStrategy)
+            .where(
+                and_(
+                    DailyStrategy.user_strategy_id.in_(user_strategy_ids),
+                    func.date(DailyStrategy.timestamp) >= start_date,
+                    func.date(DailyStrategy.timestamp) <= end_date,
+                )
+            )
+            .order_by(DailyStrategy.timestamp.asc())
+        )
+        return list(result.scalars().all())
