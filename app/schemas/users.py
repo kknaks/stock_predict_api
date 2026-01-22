@@ -48,12 +48,39 @@ class UserStrategyResponse(BaseModel):
         from_attributes = True
 
 
-class CreateAccountRequest(BaseModel):
-    """계좌 생성 요청"""
+class VerifyAccountRequest(BaseModel):
+    """계좌 인증 요청 (REAL/PAPER)"""
     account_number: str = Field(..., description="계좌 번호 (형식: 12345678-01)")
     app_key: str = Field(..., description="한국투자증권 앱 키")
     app_secret: str = Field(..., description="한국투자증권 앱 시크릿")
-    is_paper: bool = Field(default=False, description="모의투자 여부")
+    account_type: AccountType = Field(..., description="계좌 유형 (REAL/PAPER)")
+    hts_id: str = Field(..., description="한국투자증권 HTS ID")
+    exclude_account_id: Optional[int] = Field(None, description="수정 시 중복 체크에서 제외할 계좌 ID")
+
+
+class VerifyAccountResponse(BaseModel):
+    """계좌 인증 응답"""
+    verify_token: str = Field(..., description="계좌 생성에 사용할 임시 토큰")
+    account_balance: int = Field(..., description="계좌 잔고")
+
+
+class CreateAccountRequest(BaseModel):
+    """계좌 생성 요청"""
+    account_name: str = Field(..., description="계좌 이름")
+    # REAL/PAPER: verify_token 필수
+    verify_token: Optional[str] = Field(None, description="계좌 인증 후 받은 임시 토큰 (REAL/PAPER)")
+    # MOCK: 아래 필드 필수
+    account_type: Optional[AccountType] = Field(None, description="계좌 유형 (MOCK일 때만)")
+    account_balance: Optional[int] = Field(None, description="초기 잔고 (MOCK일 때만)")
+
+
+class UpdateAccountRequest(BaseModel):
+    """계좌 수정 요청"""
+    account_name: Optional[str] = Field(None, description="계좌 이름")
+    # MOCK 전용
+    account_balance: Optional[int] = Field(None, description="잔고 (MOCK만 수정 가능)")
+    # REAL/PAPER 인증 정보 수정 시
+    verify_token: Optional[str] = Field(None, description="인증 정보 수정 시 필요 (REAL/PAPER)")
 
 
 class AccountResponse(BaseModel):
@@ -63,6 +90,23 @@ class AccountResponse(BaseModel):
     account_name: str
     account_type: AccountType
     account_balance: Decimal
+    created_at: datetime
+    user_strategies: list[UserStrategyResponse] = []
+
+    class Config:
+        from_attributes = True
+
+
+class AccountDetailResponse(BaseModel):
+    """계좌 상세 응답"""
+    id: int
+    account_number: str
+    account_name: str
+    account_type: AccountType
+    account_balance: Decimal
+    hts_id: Optional[str] = None
+    app_key: str
+    app_secret: str  # 마스킹된 값
     created_at: datetime
     user_strategies: list[UserStrategyResponse] = []
 

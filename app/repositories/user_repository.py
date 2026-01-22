@@ -17,18 +17,22 @@ class UserRepository:
         self.db = db
 
     async def get_by_uid_with_accounts(self, uid: int) -> Users | None:
-        """UID로 사용자 조회 (계좌 및 전략 포함)"""
+        """UID로 사용자 조회 (계좌 및 전략 포함, 삭제된 계좌/전략 제외)"""
         result = await self.db.execute(
             select(Users)
             .options(
-                selectinload(Users.accounts)
+                selectinload(
+                    Users.accounts.and_(Accounts.is_deleted != True)
+                )
                 .selectinload(
-                    Accounts.user_strategies.and_(UserStrategy.is_deleted == False)
+                    Accounts.user_strategies.and_(UserStrategy.is_deleted != True)
                 )
                 .selectinload(UserStrategy.strategy_info),
-                selectinload(Users.accounts)
+                selectinload(
+                    Users.accounts.and_(Accounts.is_deleted != True)
+                )
                 .selectinload(
-                    Accounts.user_strategies.and_(UserStrategy.is_deleted == False)
+                    Accounts.user_strategies.and_(UserStrategy.is_deleted != True)
                 )
                 .selectinload(UserStrategy.strategy_weight_type),
             )

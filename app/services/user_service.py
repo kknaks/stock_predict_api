@@ -22,16 +22,7 @@ class UserService:
 
     async def check_account_exists(self, account_number: str) -> bool:
         """계좌번호 중복 확인"""
-        account = await self.repo.get_account_by_number(account_number)
-        return account is not None
-
-    async def create_account(self, uid: int, request: CreateAccountRequest) -> Accounts:
-        """계좌 생성"""
-        account = Accounts(
-            user_uid=uid,
-            account_number=request.account_number,
-            app_key=request.app_key,
-            app_secret=request.app_secret,
-            account_type=AccountType.PAPER if request.is_paper else AccountType.REAL,
-        )
-        return await self.repo.create_account(account)
+        if account_number != "test":
+            account = await self.repo.get_account_by_number(account_number)
+            return account is not None
+        return False

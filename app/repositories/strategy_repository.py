@@ -332,6 +332,19 @@ class StrategyRepository:
         Returns:
             생성된 UserStrategy
         """
+        # 해당 계좌에 활성 전략이 있는지 확인
+        existing_active = await self.db.execute(
+            select(UserStrategy).where(
+                UserStrategy.account_id == account_id,
+                UserStrategy.status == StrategyStatus.ACTIVE,
+                UserStrategy.is_deleted != True,
+            )
+        )
+        has_active = existing_active.scalar_one_or_none() is not None
+
+        # 첫 번째 전략이면 ACTIVE, 아니면 INACTIVE
+        initial_status = StrategyStatus.INACTIVE if has_active else StrategyStatus.ACTIVE
+
         user_strategy = UserStrategy(
             account_id=account_id,
             strategy_id=strategy_id,
@@ -340,7 +353,7 @@ class StrategyRepository:
             tp_ratio=tp_ratio,
             is_auto=is_auto,
             weight_type_id=weight_type_id,
-            status=StrategyStatus.INACTIVE,
+            status=initial_status,
             is_deleted=False,
         )
 

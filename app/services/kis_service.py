@@ -44,8 +44,29 @@ class KISService:
             "appsecret": self.app_secret,
         }
         
+        # 공식 API 예제에 맞춘 헤더 설정
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "text/plain",
+            "charset": "UTF-8",
+        }
+        
         async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=payload)
+            response = await client.post(url, json=payload, headers=headers)
+            
+            # 403 에러 시 상세 정보 로깅
+            if response.status_code == 403:
+                logger.error(
+                    f"KIS API 403 Forbidden - URL: {url}, "
+                    f"AppKey: {self.app_key[:10]}..., "
+                    f"Response: {response.text}"
+                )
+                raise ValueError(
+                    f"KIS API 인증 실패 (403 Forbidden): "
+                    f"app_key/app_secret이 잘못되었거나 환경(실전/모의)이 일치하지 않습니다. "
+                    f"Response: {response.text}"
+                )
+            
             response.raise_for_status()
             data = response.json()
         
