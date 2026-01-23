@@ -29,14 +29,17 @@ class PredictRepository:
         logger.info(f"[predict_repo] Found {len(strategies)} strategies for date {date}")
 
         # 각 전략의 예측을 날짜로 필터링하고 정렬
+        # 주의: relationship을 직접 수정하면 session commit 시 DB가 변경됨
+        # 별도 속성에 저장하여 원본 relationship 유지
         for strategy in strategies:
-            before_count = len(strategy.gap_predictions)
-            strategy.gap_predictions = [
+            filtered_predictions = [
                 pred for pred in strategy.gap_predictions
                 if pred.prediction_date == prediction_date
             ]
-            logger.info(f"[predict_repo] Strategy {strategy.id}: {before_count} -> {len(strategy.gap_predictions)} predictions after date filter")
-            strategy.gap_predictions.sort(key=lambda x: x.expected_return, reverse=True)
+            filtered_predictions.sort(key=lambda x: x.expected_return, reverse=True)
+            logger.info(f"[predict_repo] Strategy {strategy.id}: {len(strategy.gap_predictions)} -> {len(filtered_predictions)} predictions after date filter")
+            # 별도 속성에 저장 (relationship 수정 X)
+            strategy._filtered_predictions = filtered_predictions
 
         return strategies
 

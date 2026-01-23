@@ -40,7 +40,8 @@ class PredictService:
         result = []
         for strategy in strategies:
             predictions = []
-            for pred in strategy.gap_predictions:
+            # _filtered_predictions 사용 (repository에서 필터링된 결과)
+            for pred in strategy._filtered_predictions:
                 pred_dict = PredictionItem.model_validate(pred).model_dump()
                 
                 # 현재가 조회
