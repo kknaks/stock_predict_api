@@ -20,6 +20,7 @@ class KISService:
     def __init__(self, app_key: str, app_secret: str, is_paper: bool = False):
         self.app_key = app_key
         self.app_secret = app_secret
+        self.is_paper = is_paper
         self.base_url = KIS_PAPER_URL if is_paper else KIS_BASE_URL
         self.access_token: str | None = None
         self.token_expired_at: datetime | None = None
@@ -96,7 +97,12 @@ class KISService:
             await self.get_access_token()
         
         # 계좌번호 분리 (12345678-01 -> CANO=12345678, ACNT_PRDT_CD=01)
-        cano, acnt_prdt_cd = account_number.split("-")
+        # 모의 계좌는 "-"가 없을 수 있음 -> 기본값 "01"
+        if "-" in account_number:
+            cano, acnt_prdt_cd = account_number.split("-")
+        else:
+            cano = account_number
+            acnt_prdt_cd = "01"
         
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-balance"
         
@@ -104,7 +110,7 @@ class KISService:
             "authorization": f"Bearer {self.access_token}",
             "appkey": self.app_key,
             "appsecret": self.app_secret,
-            "tr_id": "TTTC8434R",  # 실전: TTTC8434R, 모의: VTTC8434R
+            "tr_id": "VTTC8434R" if self.is_paper else "TTTC8434R",
         }
         
         params = {
