@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, date as date_type
 
 from app.repositories.predict_repository import PredictRepository
@@ -6,6 +7,8 @@ from app.schemas.predict import PredictionItem, StrategyWithPredictions, Strateg
 from app.api.deps import DbSession
 from app.services.price_cache import get_price_cache
 from app.utils.market_time import is_market_open, is_today
+
+logger = logging.getLogger(__name__)
 
 
 class PredictService:
@@ -64,21 +67,24 @@ class PredictService:
                 predictions.append(PredictionItem(**pred_dict))
             
             # 후보군 필터링 및 제한 (prediction_handler와 동일한 로직)
+            logger.info(f"[predict_service] Strategy {strategy.id}: {len(predictions)} predictions before filter")
             candidate_predictions = [
                 p for p in predictions
                 if p.gap_rate < 28 and p.prob_up > 0.2
             ]
+            logger.info(f"[predict_service] Strategy {strategy.id}: {len(candidate_predictions)} predictions after filter (gap_rate<28 & prob_up>0.2)")
             candidate_predictions = sorted(
-                candidate_predictions, 
-                key=lambda x: x.prob_up, 
+                candidate_predictions,
+                key=lambda x: x.prob_up,
                 reverse=True
             )[:15]
-            
+
             result.append(
                 StrategyWithPredictions(
                     strategy_info=StrategyInfoSchema.model_validate(strategy),
                     predictions=candidate_predictions
                 )
             )
-        
+
+        logger.info(f"[predict_service] Returning {len(result)} strategies")
         return result
