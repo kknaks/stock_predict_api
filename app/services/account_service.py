@@ -77,10 +77,12 @@ class AccountService:
             logger.error(f"KIS API failed: {e}")
             raise ValueError(f"KIS API 오류: {str(e)}")
 
-        # 잔고 추출
+        # 잔고 추출 (예수금: 거래 가능한 현금 잔고)
         total_balance = 0
         if balance_data.get("output2"):
-            total_balance = int(balance_data["output2"][0].get("tot_evlu_amt", 0))
+            # dnca_tot_amt: 예수금 (거래 가능한 현금 잔고, D+2 미수금 포함)
+            # tot_evlu_amt: 총평가금액 (보유 주식 평가금액 포함)
+            total_balance = int(balance_data["output2"][0].get("dnca_tot_amt", 0))
 
         # 캐시에 저장
         verified_data = VerifiedAccountData(

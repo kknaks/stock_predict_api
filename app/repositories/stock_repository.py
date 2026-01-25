@@ -97,13 +97,16 @@ class StockRepository:
     async def get_daily_strategy_with_stocks(
         self, user_strategy_id: int, order_date: date
     ) -> DailyStrategy | None:
-        """일일 전략 조회 (종목 정보 포함)"""
+        """일일 전략 조회 (종목, UserStrategy, Account 포함)"""
         # created_at은 DateTime이므로 날짜 부분만 비교
         # 또는 timestamp 필드의 날짜 부분을 비교
         # 같은 날짜에 여러 레코드가 있을 수 있으므로 가장 최근 레코드를 선택
         result = await self.db.execute(
             select(DailyStrategy)
-            .options(selectinload(DailyStrategy.stocks))
+            .options(
+                selectinload(DailyStrategy.stocks),
+                selectinload(DailyStrategy.user_strategy).selectinload(UserStrategy.account),
+            )
             .where(
                 DailyStrategy.user_strategy_id == user_strategy_id,
                 func.date(DailyStrategy.timestamp) == order_date

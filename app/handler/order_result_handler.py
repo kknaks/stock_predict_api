@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config.db_connections import get_session_factory
 from app.schemas.order_signal import OrderResultMessage
 from app.repositories.stock_repository import StockRepository
+from app.services.kis_service import KISService
 from app.database.database.strategy import (
     DailyStrategy as DailyStrategyModel,
     DailyStrategyStock as DailyStrategyStockModel,
@@ -21,6 +22,7 @@ from app.database.database.strategy import (
     OrderStatus,
     OrderType,
 )
+from app.database.database.users import AccountType
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +203,13 @@ class OrderResultHandler:
                         existing_order,
                         message.order_type
                     )
+                    # 체결 총액으로 Account balance 반영 (account_type별 분기)
+                    await self._update_account_balance_on_execution(
+                        session,
+                        daily_strategy,
+                        existing_order,
+                        message.order_type,
+                    )
 
             await session.commit()
             logger.info(f"Successfully processed order result: order_no={message.order_no}")
@@ -311,6 +320,66 @@ class OrderResultHandler:
                     daily_strategy.sell_amount = 0.0
                 sell_amount = order.total_executed_price * order.total_executed_quantity
                 daily_strategy.sell_amount += sell_amount
+
+    async def _update_account_balance_on_execution(
+        self,
+        session: AsyncSession,
+        daily_strategy: DailyStrategyModel,
+        order: OrderModel,
+        order_type: str,
+    ) -> None:
+        """
+        전량 체결 시 Account balance 반영.
+        - MOCK: 매수/매도 총액으로 DB 직접 갱신
+        - PAPER / REAL: 한투 API 잔고 조회 후 DB 반영
+        """
+        account = daily_strategy.user_strategy.account
+        amount = float(order.total_executed_price * order.total_executed_quantity)
+
+        if account.account_type == AccountType.MOCK:
+            balance = float(account.account_balance) if account.account_balance is not None else 0.0
+            if order_type == "BUY":
+                account.account_balance = balance - amount
+            else:
+                account.account_balance = balance + amount
+            logger.info(
+                f"Updated MOCK account balance: account_id={account.id}, "
+                f"order_type={order_type}, delta={amount:+.0f}, balance={account.account_balance}"
+            )
+        elif account.account_type in (AccountType.PAPER, AccountType.REAL):
+            # PAPER/REAL: 한투 API 잔고 조회 후 DB 반영
+            is_paper = account.account_type == AccountType.PAPER
+            kis = KISService(account.app_key, account.app_secret, is_paper=is_paper)
+            if account.is_token_valid() and account.kis_access_token:
+                kis.access_token = account.kis_access_token
+            else:
+                await kis.get_access_token()
+                account.kis_access_token = kis.access_token
+                account.kis_token_expired_at = kis.token_expired_at
+            try:
+                balance_data = await kis.get_account_balance(account.account_number)
+                if balance_data.get("rt_cd") == "0" and balance_data.get("output2"):
+                    # dnca_tot_amt: 예수금 (거래 가능한 현금 잔고)
+                    # tot_evlu_amt: 총평가금액 (보유 주식 평가금액 포함)
+                    cash_balance = int(
+                        balance_data["output2"][0].get("dnca_tot_amt", 0)
+                    )
+                    account.account_balance = cash_balance
+                    logger.info(
+                        f"Updated PAPER/REAL account balance from KIS (예수금): "
+                        f"account_id={account.id}, balance={cash_balance}"
+                    )
+                else:
+                    logger.warning(
+                        f"KIS balance inquiry failed or empty output2: "
+                        f"account_id={account.id}, "
+                        f"rt_cd={balance_data.get('rt_cd', 'N/A')}"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"KIS balance inquiry error, skip balance update: "
+                    f"account_id={account.id}, error={e}"
+                )
 
 
 _handler_instance: Optional[OrderResultHandler] = None
