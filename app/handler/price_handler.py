@@ -101,10 +101,14 @@ def aggregate_ticks_to_minute_candles(
     if not ticks:
         return []
 
-    # 분 단위로 그룹핑 (trade_time: HHMMSS -> HHMM)
+    # minute_interval에 맞게 그룹핑 (trade_time: HHMMSS)
+    # 예: 10분봉이면 0901~0910 → 0900, 0911~0920 → 0910
     minute_groups: Dict[int, List[PriceMessage]] = {}
     for tick in ticks:
-        minute_key = int(tick.trade_time[:4])  # HHMM
+        hh = int(tick.trade_time[:2])
+        mm = int(tick.trade_time[2:4])
+        aligned_mm = (mm // minute_interval) * minute_interval
+        minute_key = hh * 100 + aligned_mm
         if minute_key not in minute_groups:
             minute_groups[minute_key] = []
         minute_groups[minute_key].append(tick)

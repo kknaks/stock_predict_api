@@ -64,15 +64,14 @@ class CandleRepository:
         stock_code: str,
         start_date: date,
         end_date: date,
-        minute_interval: int = 1,
     ) -> List[MinuteCandleData]:
-        """분봉 데이터 조회"""
+        """1분봉 데이터 조회 (DB에는 1분봉만 저장)"""
         stmt = (
             select(MinuteCandleData)
             .where(MinuteCandleData.stock_code == stock_code)
             .where(MinuteCandleData.candle_date >= start_date)
             .where(MinuteCandleData.candle_date <= end_date)
-            .where(MinuteCandleData.minute_interval == minute_interval)
+            .where(MinuteCandleData.minute_interval == 1)
             .order_by(MinuteCandleData.candle_date, MinuteCandleData.candle_time)
         )
 
@@ -83,14 +82,13 @@ class CandleRepository:
         self,
         stock_code: str,
         candle_date: date,
-        minute_interval: int = 1,
     ) -> List[MinuteCandleData]:
-        """특정 날짜의 분봉 데이터 조회"""
+        """특정 날짜의 1분봉 데이터 조회 (DB에는 1분봉만 저장)"""
         stmt = (
             select(MinuteCandleData)
             .where(MinuteCandleData.stock_code == stock_code)
             .where(MinuteCandleData.candle_date == candle_date)
-            .where(MinuteCandleData.minute_interval == minute_interval)
+            .where(MinuteCandleData.minute_interval == 1)
             .order_by(MinuteCandleData.candle_time)
         )
 

@@ -3,8 +3,9 @@ Candle Service - 비즈니스 로직 레이어
 """
 
 import logging
-from datetime import date
+from datetime import date, time
 from typing import List, Dict, Any, Set
+from collections import defaultdict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -95,18 +96,20 @@ class CandleService:
         end_date: date,
         minute_interval: int = 1,
     ) -> Dict[str, Any]:
-        """분봉 데이터 조회 (DB only)"""
-        candles = await self.repo.get_minute_candles(
-            stock_code, start_date, end_date, minute_interval
-        )
+        """분봉 데이터 조회 (DB에서 1분봉 가져와서 interval로 집계)"""
+        # DB에서 1분봉 조회
+        one_min_candles = await self.repo.get_minute_candles(stock_code, start_date, end_date)
+
+        # 요청한 interval로 집계
+        aggregated = self._aggregate_minute_candles(one_min_candles, minute_interval)
 
         return {
             "stock_code": stock_code,
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
             "minute_interval": minute_interval,
-            "count": len(candles),
-            "candles": [self._format_minute_candle(c) for c in candles],
+            "count": len(aggregated),
+            "candles": aggregated,
         }
 
     async def get_today_minute_candles(
@@ -114,33 +117,33 @@ class CandleService:
         stock_code: str,
         minute_interval: int = 1,
     ) -> Dict[str, Any]:
-        """오늘 분봉 데이터 조회 (DB + 캐시 실시간)"""
+        """오늘 분봉 데이터 조회 (DB 1분봉 + 캐시 실시간 → interval로 집계)"""
         today = date.today()
         all_candles = []
         db_times: Set = set()
 
-        # 1. DB에서 오늘 저장된 분봉 조회
+        # 1. DB에서 오늘 1분봉 조회 → interval로 집계
         try:
-            db_candles = await self.repo.get_minute_candles_by_date(
-                stock_code, today, minute_interval
-            )
-            for c in db_candles:
-                all_candles.append(self._format_minute_candle(c))
-                db_times.add(c.candle_time)
+            one_min_candles = await self.repo.get_minute_candles_by_date(stock_code, today)
+            aggregated = self._aggregate_minute_candles(one_min_candles, minute_interval)
+            for c in aggregated:
+                all_candles.append(c)
+                db_times.add(c["candle_time"])
         except Exception as e:
             logger.error(f"Error fetching minute candles from DB: {e}", exc_info=True)
 
-        # 2. 캐시에서 현재 시간 틱 데이터 → 분봉 계산
+        # 2. 캐시에서 현재 시간 틱 데이터 → interval로 집계
         ticks = self.price_cache.get_ticks(stock_code)
         if ticks:
             cache_candles = aggregate_ticks_to_minute_candles(
                 stock_code, ticks, today, minute_interval
             )
             for c in cache_candles:
-                if c["candle_time"] not in db_times:
+                candle_time_str = c["candle_time"].strftime("%H:%M:%S")
+                if candle_time_str not in db_times:
                     all_candles.append({
                         "candle_date": c["candle_date"].isoformat(),
-                        "candle_time": c["candle_time"].strftime("%H:%M:%S"),
+                        "candle_time": candle_time_str,
                         "open": c["open"],
                         "high": c["high"],
                         "low": c["low"],
@@ -160,6 +163,42 @@ class CandleService:
             "count": len(all_candles),
             "candles": all_candles,
         }
+
+    def _aggregate_minute_candles(
+        self,
+        one_min_candles: List,
+        minute_interval: int
+    ) -> List[Dict[str, Any]]:
+        """1분봉을 요청한 interval로 집계"""
+        if minute_interval == 1:
+            return [self._format_minute_candle(c) for c in one_min_candles]
+
+        # interval별로 그룹핑
+        groups: Dict[str, List] = defaultdict(list)
+        for candle in one_min_candles:
+            # candle_time을 interval에 맞게 정렬
+            hh = candle.candle_time.hour
+            mm = candle.candle_time.minute
+            aligned_mm = (mm // minute_interval) * minute_interval
+            key = f"{candle.candle_date.isoformat()}_{hh:02d}:{aligned_mm:02d}:00"
+            groups[key].append(candle)
+
+        # 각 그룹을 하나의 캔들로 집계
+        result = []
+        for key, candles in sorted(groups.items()):
+            candle_date_str, candle_time_str = key.split("_")
+            result.append({
+                "candle_date": candle_date_str,
+                "candle_time": candle_time_str,
+                "open": candles[0].open,  # 첫 번째 캔들의 시가
+                "high": max(c.high for c in candles),
+                "low": min(c.low for c in candles),
+                "close": candles[-1].close,  # 마지막 캔들의 종가
+                "volume": sum(c.volume for c in candles),
+                "trade_count": sum(c.trade_count for c in candles),
+            })
+
+        return result
 
     # ========================
     # Helper methods
