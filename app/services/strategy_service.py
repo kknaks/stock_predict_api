@@ -173,7 +173,7 @@ class StrategyService:
                 holding_quantity=holding_quantity,
                 current_price=current_price,
                 eval_amount=eval_amount,
-                target_price=stock.target_price,
+                target_price=stock.target_sell_price,
                 stop_loss_price=stock.stop_loss_price,
                 profit_rate=stock.profit_rate,
                 profit_amount=profit_amount,
@@ -236,13 +236,14 @@ class StrategyService:
         # 매도 완료 시 상태 판별 (holding_quantity가 0이고 sell_price가 있는 경우)
         if not stock.sell_price:
             return PositionStatus.HOLDING  # 매도가 없으면 아직 보유 중으로 간주
-
+        
+        buy_price = stock.buy_price
         sell_price = stock.sell_price
-        target_price = stock.target_price
+        target_price = stock.target_sell_price
         stop_loss_price = stock.stop_loss_price
 
         # 목표가 도달 여부
-        if target_price and sell_price >= target_price:
+        if target_price and sell_price >= buy_price:
             return PositionStatus.TARGET_REACHED
 
         # 손절 여부
