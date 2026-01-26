@@ -15,8 +15,12 @@ from app.kafka.daily_strategy_consumer import get_daily_strategy_consumer
 from app.kafka.order_signal_consumer import get_order_signal_consumer
 from app.kafka.price_consumer import get_price_consumer
 from app.kafka.websocket_command_consumer import get_websocket_command_consumer
+from app.kafka.asking_price_consumer import get_asking_price_consumer
+from app.kafka.producer import get_kafka_producer
 from app.handler.price_handler import get_price_handler
+from app.handler.asking_price_handler import get_asking_price_handler
 from app.services.price_cache import get_price_cache
+from app.services.asking_price_cache import get_asking_price_cache
 from app.handler.daily_strategy_handler import get_daily_strategy_handler
 from app.handler.order_signal_hanlder import get_order_signal_handler
 from app.handler.order_result_handler import get_order_result_handler
@@ -37,13 +41,14 @@ _consumer_task: Optional[asyncio.Task] = None
 _order_consumer_task: Optional[asyncio.Task] = None
 _price_consumer_task: Optional[asyncio.Task] = None
 _websocket_cmd_consumer_task: Optional[asyncio.Task] = None
+_asking_price_consumer_task: Optional[asyncio.Task] = None
 _consumer_tasks: list[asyncio.Task] = []
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """앱 시작/종료 시 실행되는 lifespan 이벤트"""
-    global _consumer_task, _order_consumer_task, _price_consumer_task, _websocket_cmd_consumer_task, _consumer_tasks
+    global _consumer_task, _order_consumer_task, _price_consumer_task, _websocket_cmd_consumer_task, _asking_price_consumer_task, _consumer_tasks
     
     # Startup
     logger.info(f"Starting {settings.app_name} v{settings.app_version}")
@@ -113,6 +118,33 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("Failed to connect to WebSocket command Kafka consumer")
 
+    # Asking Price Kafka Consumer 시작
+    asking_price_consumer = get_asking_price_consumer()
+    asking_price_handler = get_asking_price_handler()
+    asking_price_cache = get_asking_price_cache()
+
+    # Asking Price Cache 시작
+    await asking_price_cache.start()
+
+    # 핸들러 등록
+    asking_price_consumer.add_handler(asking_price_handler.handle_asking_price)
+
+    asking_price_consumer_connected = await asking_price_consumer.start()
+    if asking_price_consumer_connected:
+        logger.info("Asking price Kafka consumer connection established")
+        _asking_price_consumer_task = asyncio.create_task(asking_price_consumer.consume())
+        _consumer_tasks.append(_asking_price_consumer_task)
+    else:
+        logger.warning("Failed to connect to Asking price Kafka consumer")
+
+    # Kafka Producer 시작
+    kafka_producer = get_kafka_producer()
+    producer_connected = await kafka_producer.start()
+    if producer_connected:
+        logger.info("Kafka producer connection established")
+    else:
+        logger.warning("Failed to connect to Kafka producer")
+
     logger.info("Application startup complete")
     
     yield
@@ -133,11 +165,18 @@ async def lifespan(app: FastAPI):
     await order_signal_consumer.stop()
     await price_consumer.stop()
     await websocket_cmd_consumer.stop()
-    
-    # Price Cache 중지
+    await asking_price_consumer.stop()
+
+    # Producer 중지
+    kafka_producer = get_kafka_producer()
+    await kafka_producer.stop()
+
+    # Cache 중지
     price_cache = get_price_cache()
     await price_cache.stop()
-    
+    asking_price_cache = get_asking_price_cache()
+    await asking_price_cache.stop()
+
     await close_db()
     logger.info("Application shutdown complete")
 

@@ -45,6 +45,14 @@ class KafkaConfig:
     def topic_websocket_commands(self) -> str:
         return settings.topic_websocket_commands
 
+    @property
+    def topic_asking_price(self) -> str:
+        return settings.topic_asking_price
+
+    @property
+    def topic_manual_sell_signal(self) -> str:
+        return settings.topic_manual_sell_signal
+
 
 _config_instance: KafkaConfig | None = None
 

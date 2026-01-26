@@ -6,6 +6,15 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
+class StockPriceResponse(BaseModel):
+    """종목 가격 조회 응답"""
+
+    stock_code: str
+    open_price: int
+    current_price: int  # 오늘이면 현재가, 과거면 종가
+    is_market_open: bool  # 오늘+장중이면 true, 아니면 false
+
+
 class PriceMessage(BaseModel):
     """실시간 가격 데이터 메시지"""
 

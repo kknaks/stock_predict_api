@@ -54,3 +54,18 @@ class PredictRepository:
             .order_by(GapPredictions.expected_return.desc())
         )
         return list(result.scalars().all())
+
+    async def get_prediction_by_stock_and_date(
+        self, stock_code: str, date: str
+    ) -> GapPredictions | None:
+        """종목 코드와 날짜로 단일 예측 조회"""
+        prediction_date = date_type.fromisoformat(date)
+
+        result = await self.db.execute(
+            select(GapPredictions)
+            .where(
+                GapPredictions.stock_code == stock_code,
+                GapPredictions.prediction_date == prediction_date,
+            )
+        )
+        return result.scalar_one_or_none()
