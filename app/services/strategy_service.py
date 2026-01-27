@@ -109,11 +109,6 @@ class StrategyService:
             sell_qty = int(stock.sell_quantity or 0)
             holding_quantity = buy_qty - sell_qty
 
-            # 수익금액 계산 (매도 완료된 경우만)
-            profit_amount = None
-            if buy_amount and sell_amount:
-                profit_amount = sell_amount - buy_amount
-
             # 포지션 상태 결정
             status = self._determine_position_status(
                 stock=stock,
@@ -129,6 +124,19 @@ class StrategyService:
                 if holding_quantity > 0:
                     eval_amount = current_price * holding_quantity
             # TODO: PriceCache에 없으면 DB에서 종가(close_price) 조회하는 로직 추가
+
+            # 수익금액/수익률 계산
+            profit_amount = None
+            profit_rate = None
+
+            if buy_amount and sell_amount:
+                # 매도 완료: 실현 수익
+                profit_amount = sell_amount - buy_amount
+                profit_rate = round((profit_amount / buy_amount) * 100, 2)
+            elif eval_amount and buy_amount:
+                # 보유 중: 미실현 수익 (현재가 기준)
+                profit_amount = eval_amount - buy_amount
+                profit_rate = round((profit_amount / buy_amount) * 100, 2)
 
             # 상태별 집계
             if status == PositionStatus.NOT_PURCHASED:
@@ -175,7 +183,7 @@ class StrategyService:
                 eval_amount=eval_amount,
                 target_price=stock.target_sell_price,
                 stop_loss_price=stock.stop_loss_price,
-                profit_rate=stock.profit_rate,
+                profit_rate=profit_rate,
                 profit_amount=profit_amount,
                 status=status,
                 order_count=order_count,

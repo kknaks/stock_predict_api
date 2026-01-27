@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     order_signal: str = "order_signal"
     topic_price: str = "stock_price"
     topic_websocket_commands: str = "kis_websocket_commands"
-    topic_asking_price: str = "asking_price"
+    topic_asking_price: str = "stock_asking_price"
     topic_manual_sell_signal: str = "manual-sell-signal"
     
     @property
