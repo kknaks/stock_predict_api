@@ -371,3 +371,10 @@ class StrategyRepository:
             .where(UserStrategy.id == user_strategy.id)
         )
         return result.scalar_one()
+
+    async def get_user_strategy_id_by_daily(self, daily_strategy_id: int) -> Optional[int]:
+        """DailyStrategy ID에 해당하는 UserStrategy ID 조회"""
+        result = await self.db.execute(
+            select(UserStrategy.id).where(UserStrategy.daily_strategy_id == daily_strategy_id)
+        )
+        return result.scalar_one_or_none()

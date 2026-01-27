@@ -345,3 +345,7 @@ class StrategyService:
             is_auto=request.is_auto,
             weight_type_id=request.strategy_weight_type_id,
         )
+
+    async def get_user_strategy_id_by_daily(self, daily_strategy_id: int) -> int:
+        """DailyStrategy ID에 해당하는 UserStrategy ID 조회"""
+        return await self.repo.get_user_strategy_id_by_daily(daily_strategy_id)
