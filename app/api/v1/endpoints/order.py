@@ -37,7 +37,7 @@ async def manual_sell(
             detail="order_price is required for LIMIT order"
         )
 
-    strategy_id = service.get_user_strategy_id_by_daily(request.daily_strategy_id)
+    strategy_id = await service.get_user_strategy_id_by_daily(request.daily_strategy_id)
     if not strategy_id:
         raise HTTPException(
             status_code=400,
