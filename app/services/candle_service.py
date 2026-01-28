@@ -10,6 +10,7 @@ from collections import defaultdict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.candle_repository import CandleRepository
+from app.repositories.predict_repository import PredictRepository
 from app.services.price_cache import get_price_cache
 from app.handler.price_handler import aggregate_ticks_to_candle, aggregate_ticks_to_minute_candles
 
@@ -103,6 +104,9 @@ class CandleService:
         # 요청한 interval로 집계
         aggregated = self._aggregate_minute_candles(one_min_candles, minute_interval)
 
+        # 시가/종가 조회 (end_date 기준)
+        price_info = await self._get_price_info(stock_code, end_date)
+
         return {
             "stock_code": stock_code,
             "start_date": start_date.isoformat(),
@@ -110,6 +114,8 @@ class CandleService:
             "minute_interval": minute_interval,
             "count": len(aggregated),
             "candles": aggregated,
+            "open_price": price_info["open_price"],
+            "close_price": price_info["close_price"],
         }
 
     async def get_today_minute_candles(
@@ -155,6 +161,9 @@ class CandleService:
         # 시간순 정렬
         all_candles.sort(key=lambda x: x["candle_time"])
 
+        # 시가/종가 조회
+        price_info = await self._get_price_info(stock_code, today)
+
         return {
             "stock_code": stock_code,
             "date": today.isoformat(),
@@ -162,6 +171,8 @@ class CandleService:
             "source": self._get_source(bool(db_times), bool(ticks)),
             "count": len(all_candles),
             "candles": all_candles,
+            "open_price": price_info["open_price"],
+            "close_price": price_info["close_price"],
         }
 
     def _aggregate_minute_candles(
@@ -203,6 +214,18 @@ class CandleService:
     # ========================
     # Helper methods
     # ========================
+
+    async def _get_price_info(self, stock_code: str, target_date: date) -> Dict[str, Any]:
+        """시가/종가 조회 (GapPredictions 기반)"""
+        predict_repo = PredictRepository(self.db)
+        prediction = await predict_repo.get_prediction_by_stock_and_date(
+            stock_code, target_date.isoformat()
+        )
+
+        return {
+            "open_price": prediction.stock_open if prediction else None,
+            "close_price": prediction.actual_close if prediction else None,
+        }
 
     def _format_hour_candle(self, candle) -> Dict[str, Any]:
         """시간봉 데이터 포맷팅"""
