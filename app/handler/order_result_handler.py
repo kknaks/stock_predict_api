@@ -289,6 +289,9 @@ class OrderResultHandler:
                 f"is_fully_executed={order.is_fully_executed}"
             )
 
+            # autoflush=False이므로 SELECT 전에 flush 필요
+            await session.flush()
+
             # DailyStrategy의 총 매수금액: 모든 DailyStrategyStock에서 재계산
             stmt = select(
                 func.sum(DailyStrategyStockModel.buy_price * DailyStrategyStockModel.buy_quantity)
@@ -328,6 +331,9 @@ class OrderResultHandler:
                     f"SELL execution but buy_price/buy_quantity not set: "
                     f"stock_code={daily_strategy_stock.stock_code}"
                 )
+
+            # autoflush=False이므로 SELECT 전에 flush 필요
+            await session.flush()
 
             # DailyStrategy의 총 매도금액: 모든 DailyStrategyStock에서 재계산
             stmt = select(
