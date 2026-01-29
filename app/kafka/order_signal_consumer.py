@@ -90,18 +90,15 @@ class KafkaOrderSignalConsumer:
                                 f"status={order_result_msg.status}, "
                                 f"user_strategy_id={order_result_msg.user_strategy_id}"
                             )
-                            
+
                             # 등록된 주문 결과 핸들러들 호출
                             for handler in self._order_result_handlers:
-                                try:
-                                    if asyncio.iscoroutinefunction(handler):
-                                        await handler(order_result_msg)
-                                    else:
-                                        handler(order_result_msg)
-                                except Exception as e:
-                                    logger.error(f"Order result handler error: {e}", exc_info=True)
+                                if asyncio.iscoroutinefunction(handler):
+                                    await handler(order_result_msg)
+                                else:
+                                    handler(order_result_msg)
                         except Exception as e:
-                            logger.error(f"Failed to parse OrderResultMessage: {e}, data={data}")
+                            logger.error(f"Order result handler error: {e}, data={data}", exc_info=True)
                     else:
                         # 기존 주문 시그널 메시지 (하위 호환성)
                         try:

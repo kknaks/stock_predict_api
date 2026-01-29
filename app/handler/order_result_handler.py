@@ -9,6 +9,7 @@ import asyncio
 from typing import Optional
 from datetime import datetime
 
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
@@ -35,47 +36,65 @@ class OrderResultHandler:
 
     def __init__(self):
         self._session_factory = get_session_factory()
+        # order_no별 처리 lock - 같은 주문의 체결통보를 순차 처리
+        self._order_locks: dict[str, asyncio.Lock] = {}
 
-    async def handle_order_result(self, message: OrderResultMessage, max_retries: int = 3) -> None:
+    def _get_order_lock(self, order_no: str) -> asyncio.Lock:
+        """주문번호별 Lock 반환 (없으면 생성)"""
+        if order_no not in self._order_locks:
+            self._order_locks[order_no] = asyncio.Lock()
+        return self._order_locks[order_no]
+
+    def _cleanup_order_lock(self, order_no: str) -> None:
+        """완료된 주문의 Lock 정리"""
+        self._order_locks.pop(order_no, None)
+
+    async def handle_order_result(self, message: OrderResultMessage, max_retries: int = 5) -> None:
         """
         주문 결과 메시지 처리 및 데이터베이스 저장
 
-        주문 접수(status: "ordered") 시:
-            - Order 테이블에 주문 내역 저장
-
-        체결통보(status: "partially_executed" or "executed") 시:
-            - 기존 Order 조회 및 업데이트
-            - OrderExecution 테이블에 체결 내역 저장
-
-        동시에 여러 메시지가 들어올 경우 Row-level Lock으로 순서 보장.
-        Order가 없어서 생성 시 충돌나면 재시도.
+        같은 order_no에 대한 메시지를 asyncio.Lock으로 직렬화하여
+        DB row-level lock 경합 없이 순차 처리.
         """
         logger.info(
             f"Processing order result message: order_no={message.order_no}, "
-            f"status={message.status}, user_strategy_id={message.user_strategy_id}"
+            f"status={message.status}, user_strategy_id={message.user_strategy_id}, "
+            f"total_executed_quantity={message.total_executed_quantity}"
         )
 
-        for attempt in range(max_retries):
-            try:
-                await self._process_order_result(message)
-                return  # 성공하면 종료
-            except IntegrityError as e:
-                # 동시에 Order 생성 시 unique constraint 충돌 → 재시도
-                logger.warning(
-                    f"IntegrityError on attempt {attempt + 1}/{max_retries} "
-                    f"for order_no={message.order_no}: {e}"
-                )
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(0.1 * (attempt + 1))  # 점진적 대기
-                else:
-                    logger.error(
-                        f"Failed to process order result after {max_retries} attempts: "
-                        f"order_no={message.order_no}"
+        # 같은 주문번호에 대한 메시지를 순차 처리
+        lock = self._get_order_lock(message.order_no)
+        async with lock:
+            for attempt in range(max_retries):
+                try:
+                    await self._process_order_result(message)
+                    # 전량 체결 완료 시 lock 정리
+                    if message.is_fully_executed:
+                        self._cleanup_order_lock(message.order_no)
+                    return
+                except IntegrityError as e:
+                    logger.warning(
+                        f"IntegrityError on attempt {attempt + 1}/{max_retries} "
+                        f"for order_no={message.order_no}: {e}"
                     )
-                    raise
-            except Exception as e:
-                logger.error(f"Error processing order result: {e}", exc_info=True)
-                raise
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(0.1 * (attempt + 1))
+                    else:
+                        logger.error(
+                            f"Failed to process order result after {max_retries} attempts: "
+                            f"order_no={message.order_no}"
+                        )
+                        raise
+                except Exception as e:
+                    logger.error(
+                        f"Error processing order result (attempt {attempt + 1}/{max_retries}): "
+                        f"order_no={message.order_no}, error={e}",
+                        exc_info=True
+                    )
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(0.1 * (attempt + 1))
+                    else:
+                        raise
 
     async def _process_order_result(self, message: OrderResultMessage) -> None:
         """실제 주문 결과 처리 로직"""
@@ -117,9 +136,7 @@ class OrderResultHandler:
                 )
                 return
 
-            # 주문번호로 기존 Order 조회 (SQLAlchemy 2.0 스타일)
-            # with_for_update(): 동시에 여러 메시지가 들어와도 순서대로 처리되도록 Row-level Lock
-            from sqlalchemy import select
+            # 주문번호로 기존 Order 조회
             stmt = select(OrderModel).where(
                 OrderModel.order_no == message.order_no
             ).with_for_update()
@@ -132,7 +149,6 @@ class OrderResultHandler:
                     logger.warning(
                         f"Order already exists: order_no={message.order_no}, updating..."
                     )
-                    # 기존 주문이 있으면 업데이트 (재수신 경우 대비)
                     existing_order.order_quantity = message.order_quantity
                     existing_order.order_price = message.order_price
                     existing_order.order_dvsn = message.order_dvsn
@@ -143,7 +159,6 @@ class OrderResultHandler:
                     existing_order.is_fully_executed = False
                     existing_order.ordered_at = timestamp
                 else:
-                    # 새 주문 생성
                     new_order = OrderModel(
                         daily_strategy_stock_id=daily_strategy_stock.id,
                         order_no=message.order_no,
@@ -172,7 +187,6 @@ class OrderResultHandler:
                         f"Order not found for execution: order_no={message.order_no}, "
                         f"creating order first..."
                     )
-                    # 주문이 없으면 먼저 생성 (체결통보가 먼저 도착한 경우)
                     existing_order = OrderModel(
                         daily_strategy_stock_id=daily_strategy_stock.id,
                         order_no=message.order_no,
@@ -190,22 +204,33 @@ class OrderResultHandler:
                         ordered_at=timestamp,
                     )
                     session.add(existing_order)
-                    await session.flush()  # ID를 얻기 위해 flush
+                    await session.flush()
                 else:
-                    # 기존 주문 업데이트
-                    existing_order.status = OrderStatus.PARTIALLY_EXECUTED if message.status == "partially_executed" else OrderStatus.EXECUTED
-                    existing_order.total_executed_quantity = message.total_executed_quantity
-                    existing_order.total_executed_price = message.total_executed_price
-                    existing_order.remaining_quantity = message.remaining_quantity
-                    existing_order.is_fully_executed = message.is_fully_executed
+                    # 누적 체결수량이 DB보다 큰 경우에만 업데이트 (idempotent)
+                    if message.total_executed_quantity >= (existing_order.total_executed_quantity or 0):
+                        existing_order.status = (
+                            OrderStatus.PARTIALLY_EXECUTED
+                            if message.status == "partially_executed"
+                            else OrderStatus.EXECUTED
+                        )
+                        existing_order.total_executed_quantity = message.total_executed_quantity
+                        existing_order.total_executed_price = message.total_executed_price
+                        existing_order.remaining_quantity = message.remaining_quantity
+                        existing_order.is_fully_executed = message.is_fully_executed
+                    else:
+                        logger.warning(
+                            f"Skipping stale message: order_no={message.order_no}, "
+                            f"msg_total={message.total_executed_quantity}, "
+                            f"db_total={existing_order.total_executed_quantity}"
+                        )
 
-                # 체결 순서 계산 (기존 체결 건수 조회)
-                execution_stmt = select(OrderExecutionModel).where(
+                # 체결 순서 계산 (count 기반으로 중복 sequence 방지)
+                count_stmt = select(func.count()).select_from(OrderExecutionModel).where(
                     OrderExecutionModel.order_id == existing_order.id
-                ).order_by(OrderExecutionModel.execution_sequence.desc())
-                execution_result = await session.execute(execution_stmt)
-                last_execution = execution_result.scalar_one_or_none()
-                execution_sequence = (last_execution.execution_sequence + 1) if last_execution else 1
+                )
+                count_result = await session.execute(count_stmt)
+                execution_count = count_result.scalar() or 0
+                execution_sequence = execution_count + 1
 
                 # OrderExecution 생성
                 new_execution = OrderExecutionModel(
@@ -267,20 +292,10 @@ class OrderResultHandler:
     ) -> None:
         """
         체결 시마다 DailyStrategyStock 및 DailyStrategy 업데이트 (부분 체결 포함)
-
-        Args:
-            session: DB 세션
-            daily_strategy_stock: DailyStrategyStock 객체
-            daily_strategy: DailyStrategy 객체
-            order: Order 객체 (현재까지의 누적 체결 정보 포함)
-            order_type: "BUY" or "SELL"
         """
-        from sqlalchemy import select, func
-
         if order_type == "BUY":
-            # 매수 체결: 누적 체결 정보로 덮어쓰기 (부분 체결 시에도 업데이트)
-            daily_strategy_stock.buy_price = order.total_executed_price  # 가중평균 체결 가격
-            daily_strategy_stock.buy_quantity = float(order.total_executed_quantity)  # 누적 체결 수량
+            daily_strategy_stock.buy_price = order.total_executed_price
+            daily_strategy_stock.buy_quantity = float(order.total_executed_quantity)
 
             logger.info(
                 f"Updated DailyStrategyStock buy info: stock_code={daily_strategy_stock.stock_code}, "
@@ -289,10 +304,8 @@ class OrderResultHandler:
                 f"is_fully_executed={order.is_fully_executed}"
             )
 
-            # autoflush=False이므로 SELECT 전에 flush 필요
             await session.flush()
 
-            # DailyStrategy의 총 매수금액: 모든 DailyStrategyStock에서 재계산
             stmt = select(
                 func.sum(DailyStrategyStockModel.buy_price * DailyStrategyStockModel.buy_quantity)
             ).where(
@@ -305,16 +318,13 @@ class OrderResultHandler:
             daily_strategy.buy_amount = total_buy_amount
 
         elif order_type == "SELL":
-            # 매도 체결: 누적 체결 정보로 덮어쓰기
-            daily_strategy_stock.sell_price = order.total_executed_price  # 가중평균 체결 가격
-            daily_strategy_stock.sell_quantity = float(order.total_executed_quantity)  # 누적 체결 수량
+            daily_strategy_stock.sell_price = order.total_executed_price
+            daily_strategy_stock.sell_quantity = float(order.total_executed_quantity)
 
-            # 수익률 계산 (매수가가 있는 경우에만)
             if daily_strategy_stock.buy_price and daily_strategy_stock.buy_quantity:
                 profit_rate = ((order.total_executed_price - daily_strategy_stock.buy_price) / daily_strategy_stock.buy_price) * 100
                 daily_strategy_stock.profit_rate = profit_rate
 
-                # 수익금액 계산 (실제 체결 수량 기준) - 로그용
                 actual_quantity = min(order.total_executed_quantity, int(daily_strategy_stock.buy_quantity))
                 profit_amount = (order.total_executed_price - daily_strategy_stock.buy_price) * actual_quantity
 
@@ -332,10 +342,8 @@ class OrderResultHandler:
                     f"stock_code={daily_strategy_stock.stock_code}"
                 )
 
-            # autoflush=False이므로 SELECT 전에 flush 필요
             await session.flush()
 
-            # DailyStrategy의 총 매도금액: 모든 DailyStrategyStock에서 재계산
             stmt = select(
                 func.sum(DailyStrategyStockModel.sell_price * DailyStrategyStockModel.sell_quantity)
             ).where(
@@ -347,7 +355,6 @@ class OrderResultHandler:
             total_sell_amount = result.scalar() or 0.0
             daily_strategy.sell_amount = total_sell_amount
 
-            # DailyStrategy의 총 수익금액/수익률: 모든 DailyStrategyStock에서 재계산
             profit_stmt = select(
                 func.sum(
                     (DailyStrategyStockModel.sell_price - DailyStrategyStockModel.buy_price)
@@ -363,7 +370,6 @@ class OrderResultHandler:
             profit_result = await session.execute(profit_stmt)
             daily_strategy.total_profit_amount = profit_result.scalar() or 0.0
 
-            # 총 수익률 계산 (매수금액 대비)
             buy_stmt = select(
                 func.sum(DailyStrategyStockModel.buy_price * DailyStrategyStockModel.buy_quantity)
             ).where(
@@ -388,15 +394,8 @@ class OrderResultHandler:
     ) -> None:
         """
         체결 시마다 Account balance 반영 (이번 체결분 delta만).
-
-        Args:
-            executed_quantity: 이번 체결 수량
-            executed_price: 이번 체결 가격
-        - MOCK: 이번 체결분만큼 DB 직접 갱신
-        - PAPER / REAL: 한투 API 잔고 조회 후 DB 반영
         """
         account = daily_strategy.user_strategy.account
-        # 이번 체결분 금액 (delta)
         delta_amount = float(executed_price * executed_quantity)
 
         if account.account_type == AccountType.MOCK:
@@ -411,10 +410,8 @@ class OrderResultHandler:
                 f"balance={account.account_balance}"
             )
         elif account.account_type in (AccountType.PAPER, AccountType.REAL):
-            # PAPER/REAL: 한투 API 잔고 조회 후 DB 반영
             is_paper = account.account_type == AccountType.PAPER
 
-            # Rate limit 적용 - 계좌별 (PAPER: 초당 2건, REAL: 초당 20건)
             rate_limiter = get_account_rate_limiter(account.id, is_paper)
             await rate_limiter._wait_if_needed_async()
 
@@ -428,8 +425,6 @@ class OrderResultHandler:
             try:
                 balance_data = await kis.get_account_balance(account.account_number)
                 if balance_data.get("rt_cd") == "0" and balance_data.get("output2"):
-                    # dnca_tot_amt: 예수금 (거래 가능한 현금 잔고)
-                    # tot_evlu_amt: 총평가금액 (보유 주식 평가금액 포함)
                     cash_balance = int(
                         balance_data["output2"][0].get("dnca_tot_amt", 0)
                     )
