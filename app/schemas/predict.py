@@ -48,6 +48,7 @@ class PredictionItem(BaseModel):
     actual_max_return: Optional[float] = Field(None, description="실제 고가 수익률 (%)")
     max_return_diff: Optional[float] = Field(None, description="고가 예측 차이")
     direction_correct: Optional[int] = Field(None, description="예측 방향 정확도 (1: 맞음, 0: 틀림)")
+    is_nxt: Optional[bool] = Field(None, description="NXT 여부")
     current_price: Optional[float] = Field(None, description="현재가 (장중) 또는 종가 (장 마감 후/이전 날)")
 
     class Config:

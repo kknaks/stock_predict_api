@@ -67,18 +67,21 @@ class PredictService:
                 pred_dict["current_price"] = current_price
                 predictions.append(PredictionItem(**pred_dict))
             
-            # 후보군 필터링 및 제한 (prediction_handler와 동일한 로직)
-            logger.info(f"[predict_service] Strategy {strategy.id}: {len(predictions)} predictions before filter")
-            candidate_predictions = [
+            # 후보군 필터링: is_nxt별 10개씩 (실시간 구독 대상과 동일한 로직)
+            base_filtered = [
                 p for p in predictions
                 if p.gap_rate < 28 and p.prob_up > 0.2
             ]
-            logger.info(f"[predict_service] Strategy {strategy.id}: {len(candidate_predictions)} predictions after filter (gap_rate<28 & prob_up>0.2)")
-            candidate_predictions = sorted(
-                candidate_predictions,
-                key=lambda x: x.prob_up,
-                reverse=True
-            )[:15]
+            nxt_candidates = sorted(
+                [p for p in base_filtered if p.is_nxt is True],
+                key=lambda x: x.prob_up, reverse=True
+            )[:10]
+            non_nxt_candidates = sorted(
+                [p for p in base_filtered if not p.is_nxt],
+                key=lambda x: x.prob_up, reverse=True
+            )[:10]
+            candidate_predictions = nxt_candidates + non_nxt_candidates
+            logger.info(f"[predict_service] Strategy {strategy.id}: nxt={len(nxt_candidates)}, non_nxt={len(non_nxt_candidates)}")
 
             result.append(
                 StrategyWithPredictions(
