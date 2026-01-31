@@ -89,6 +89,11 @@ class Settings(BaseSettings):
     master_secret_key: str = "master-secret-key-change-this"  # 마스터 계정 생성용 시크릿
     
     # -------------------------------------------
+    # Models (리포트 조회용)
+    # -------------------------------------------
+    models_base_dir: str = "/app/models/stacking"
+
+    # -------------------------------------------
     # CORS
     # -------------------------------------------
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]

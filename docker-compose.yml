@@ -9,6 +9,8 @@ services:
     restart: unless-stopped
     ports:
       - "8003:8003"
+    volumes:
+      - ../stock_predict/models:/app/models:ro
     env_file:
       - .env
     networks:
