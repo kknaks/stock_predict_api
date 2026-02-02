@@ -178,7 +178,7 @@ async def stream_asking_price_updates(
                     last_askp1[stock_code] = cached.askp1
 
             while True:
-                await asyncio.sleep(0.5)  # 0.5초마다 체크 (호가는 변동이 잦음)
+                await asyncio.sleep(0.1)  # 0.5초마다 체크 (호가는 변동이 잦음)
 
                 # 연결이 끊어졌는지 확인
                 if client_id not in _asking_price_clients:
