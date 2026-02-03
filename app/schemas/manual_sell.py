@@ -17,7 +17,7 @@ class OrderType(str, Enum):
 class ManualSellRequest(BaseModel):
     """수동 매도 요청"""
 
-    user_strategy_id: int
+    daily_strategy_id: int
     stock_code: str
     order_type: OrderType
     order_price: Optional[int] = None  # 지정가인 경우 필수
