@@ -119,11 +119,11 @@ class StockRepository:
     async def get_closing_price(self, stock_code: str, target_date: date) -> Optional[float]:
         """
         종목의 특정 날짜 종가 조회
-        
+
         Args:
             stock_code: 종목 코드
             target_date: 조회할 날짜
-        
+
         Returns:
             종가 또는 None (데이터가 없으면)
         """
@@ -133,6 +133,31 @@ class StockRepository:
                 StockPrices.symbol == stock_code,
                 StockPrices.date == target_date
             )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_latest_closing_price(self, stock_code: str, target_date: date) -> Optional[float]:
+        """
+        종목의 가장 최근 종가 조회 (target_date 이하)
+
+        PriceCache 미스 시 fallback으로 사용.
+        target_date가 오늘이면 전일 종가, 과거 날짜면 해당일 종가 반환.
+
+        Args:
+            stock_code: 종목 코드
+            target_date: 기준 날짜
+
+        Returns:
+            종가 또는 None
+        """
+        result = await self.db.execute(
+            select(StockPrices.close)
+            .where(
+                StockPrices.symbol == stock_code,
+                StockPrices.date <= target_date
+            )
+            .order_by(StockPrices.date.desc())
+            .limit(1)
         )
         return result.scalar_one_or_none()
 

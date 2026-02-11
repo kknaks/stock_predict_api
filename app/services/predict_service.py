@@ -49,18 +49,18 @@ class PredictService:
                 stock_code = pred_dict.get("stock_code")
                 
                 if stock_code:
-                    # 장중이고 오늘이면 메모리 캐시에서 조회
-                    if market_is_open and date_is_today:
+                    # 오늘이면 PriceCache에서 먼저 조회 (장후에도 08시까지 캐시 유지)
+                    if date_is_today:
                         cached_price = self.price_cache.get(stock_code)
                         if cached_price:
                             try:
                                 current_price = float(cached_price.current_price)
                             except (ValueError, AttributeError):
                                 pass
-                    
-                    # 장 마감 후나 이전 날이면 DB에서 종가 조회
+
+                    # 캐시 미스 또는 과거 날짜면 DB에서 최근 종가 조회
                     if current_price is None and target_date:
-                        closing_price = await self.stock_repo.get_closing_price(stock_code, target_date)
+                        closing_price = await self.stock_repo.get_latest_closing_price(stock_code, target_date)
                         if closing_price:
                             current_price = float(closing_price)
                 

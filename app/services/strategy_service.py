@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.strategy_repository import StrategyRepository
 from app.repositories.account_repository import AccountRepository
+from app.repositories.stock_repository import StockRepository
 from app.schemas.td_position import (
     TdPositionResponse,
     AccountPositionResponse,
@@ -27,6 +28,7 @@ class StrategyService:
         self.db = db
         self.repo = StrategyRepository(db)
         self.account_repo = AccountRepository(db)
+        self.stock_repo = StockRepository(db)
 
     async def get_td_position(self, user_id: int, date_str: str) -> TdPositionResponse:
         """
@@ -115,15 +117,22 @@ class StrategyService:
                 holding_quantity=holding_quantity,
             )
 
-            # 현재가 조회 (보유 중인 종목)
+            # 현재가 조회 (PriceCache → DB fallback)
             current_price = None
             eval_amount = None
             price_data = price_cache.get(stock.stock_code)
             if price_data:
                 current_price = int(price_data.current_price)
-                if holding_quantity > 0:
-                    eval_amount = current_price * holding_quantity
-            # TODO: PriceCache에 없으면 DB에서 종가(close_price) 조회하는 로직 추가
+            else:
+                # PriceCache 미스: DB에서 가장 최근 종가 조회
+                close_price = await self.stock_repo.get_latest_closing_price(
+                    stock.stock_code, target_date
+                )
+                if close_price:
+                    current_price = int(close_price)
+
+            if current_price and holding_quantity > 0:
+                eval_amount = current_price * holding_quantity
 
             # 수익금액/수익률 계산
             profit_amount = None
@@ -250,8 +259,8 @@ class StrategyService:
         target_price = stock.target_sell_price
         stop_loss_price = stock.stop_loss_price
 
-        # 목표가 도달 여부
-        if target_price and sell_price >= buy_price:
+        # 목표가 도달 여부 (매도가 >= 목표가)
+        if target_price and sell_price >= target_price:
             return PositionStatus.TARGET_REACHED
 
         # 손절 여부

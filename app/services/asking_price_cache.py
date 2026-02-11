@@ -16,7 +16,7 @@ from app.schemas.asking_price import AskingPriceMessage
 logger = logging.getLogger(__name__)
 
 KST = ZoneInfo("Asia/Seoul")
-MARKET_CLOSE_HOUR = 18
+MARKET_CLOSE_HOUR = 8  # 익일 08시에 전일 캐시 정리
 
 
 class AskingPriceCache:

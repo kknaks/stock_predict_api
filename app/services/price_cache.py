@@ -17,7 +17,7 @@ from app.schemas.price import PriceMessage
 logger = logging.getLogger(__name__)
 
 KST = ZoneInfo("Asia/Seoul")
-MARKET_CLOSE_HOUR = 18
+MARKET_CLOSE_HOUR = 8  # 익일 08시에 전일 캐시 정리
 
 
 def parse_trade_time_hour(trade_time: str) -> Optional[int]:
