@@ -164,8 +164,8 @@ class PriceHandler:
 
             # 시간이 바뀌었으면 직전 시간 데이터를 시간봉/분봉으로 저장
             if hour_changed and prev_hour is not None and prev_hour_data:
-                # 장 시간 필터 (09:00 ~ 15:30)
-                if 9 <= prev_hour <= 15:
+                # 장 시간 필터 (08:00 ~ 20:00) - NXT 프리마켓(08:00~) + 야간장(~20:00) 포함
+                if 8 <= prev_hour <= 20:
                     asyncio.create_task(
                         self._save_hour_candles(prev_hour, prev_hour_data)
                     )
